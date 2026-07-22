@@ -10,6 +10,14 @@ export interface ClipSummary {
   notes: string;
 }
 
+export interface Marker {
+  id: string;
+  label: string;
+  inSeconds: number;
+  outSeconds: number;
+  notes: string;
+}
+
 export interface SaveClipMetadataInput {
   libraryRoot: string;
   id: string;
@@ -17,4 +25,5 @@ export interface SaveClipMetadataInput {
   contentHash: string;
   tags: string[];
   notes: string;
+  markers: Marker[];
 }

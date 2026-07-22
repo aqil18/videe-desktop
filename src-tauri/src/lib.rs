@@ -158,12 +158,13 @@ struct SaveClipMetadataInput {
     content_hash: String,
     tags: Vec<String>,
     notes: String,
+    markers: Vec<metadata::Marker>,
 }
 
-/// Reads the clip's existing sidecar if one exists (to preserve fields this command
-/// doesn't touch, e.g. markers), merges in the new tags/notes, writes it back
-/// atomically, and updates the cache. Takes a plain `&Connection` so it's testable
-/// without spinning up a Tauri app.
+/// Writes the full editable record (tags, notes, markers) for a clip in one shot.
+/// The frontend's debounced editor always sends all three together so this command
+/// never has to guess which fields the caller meant to leave untouched. Takes a
+/// plain `&Connection` so it's testable without spinning up a Tauri app.
 fn save_clip_metadata_impl(conn: &Connection, input: &SaveClipMetadataInput) -> Result<ClipSummary, String> {
     let root = Path::new(&input.library_root);
     let sidecar_path = metadata::sidecar_path(root, &input.id);
@@ -174,6 +175,7 @@ fn save_clip_metadata_impl(conn: &Connection, input: &SaveClipMetadataInput) -> 
     record.filename = input.filename.clone();
     record.tags = input.tags.clone();
     record.notes = input.notes.clone();
+    record.markers = input.markers.clone();
     record.author = metadata::current_user();
     record.updated_at = metadata::now_iso8601();
     if record.content_hash.is_none() {
@@ -190,11 +192,24 @@ fn save_clip_metadata_impl(conn: &Connection, input: &SaveClipMetadataInput) -> 
         .ok_or_else(|| format!("clip {} not found in cache after save", input.id))
 }
 
-/// Called from the (debounced) tag/notes editor.
+/// Called from the (debounced) clip editor: tags, notes, and markers together.
 #[tauri::command]
 fn save_clip_metadata(state: State<'_, AppState>, input: SaveClipMetadataInput) -> Result<ClipSummary, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     save_clip_metadata_impl(&conn, &input)
+}
+
+/// Reads a clip's markers straight from its sidecar (the cache doesn't index them).
+/// Returns an empty list if the clip has no sidecar yet rather than erroring, since
+/// "no metadata written yet" is the normal state for an untagged clip.
+#[tauri::command]
+fn get_clip_markers(library_root: String, id: String) -> Result<Vec<metadata::Marker>, String> {
+    let root = Path::new(&library_root);
+    let sidecar_path = metadata::sidecar_path(root, &id);
+    match metadata::read_metadata(&sidecar_path) {
+        Ok(record) => Ok(record.markers),
+        Err(_) => Ok(Vec::new()),
+    }
 }
 
 /// (Re)starts the `.metadata/` watcher for `library_root`. Replacing the previous
@@ -231,6 +246,7 @@ pub fn run() {
             scan_library,
             get_cached_library,
             save_clip_metadata,
+            get_clip_markers,
             start_watching,
         ])
         .run(tauri::generate_context!())
@@ -280,6 +296,13 @@ mod tests {
             content_hash: "hash-a".to_string(),
             tags: vec!["b-roll".to_string()],
             notes: "nice shot".to_string(),
+            markers: vec![metadata::Marker {
+                id: "marker-1".to_string(),
+                label: "Best take".to_string(),
+                in_seconds: 1.0,
+                out_seconds: 2.5,
+                notes: String::new(),
+            }],
         };
 
         let updated = save_clip_metadata_impl(&conn, &input).expect("save should succeed");
@@ -293,7 +316,19 @@ mod tests {
         let on_disk = metadata::read_metadata(&sidecar_path).unwrap();
         assert_eq!(on_disk.tags, vec!["b-roll".to_string()]);
         assert_eq!(on_disk.content_hash, Some("hash-a".to_string()));
+        assert_eq!(on_disk.markers.len(), 1);
+        assert_eq!(on_disk.markers[0].label, "Best take");
 
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn get_clip_markers_returns_empty_for_untagged_clip() {
+        let root = temp_library();
+        std::fs::create_dir_all(&root).unwrap();
+        let markers = get_clip_markers(root.to_string_lossy().to_string(), "no-such-clip".to_string())
+            .expect("should not error for a clip with no sidecar yet");
+        assert!(markers.is_empty());
         std::fs::remove_dir_all(&root).ok();
     }
 }

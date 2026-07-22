@@ -1,7 +1,10 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
-import { saveClipMetadata } from "../lib/api";
-import type { ClipSummary } from "../types";
+import { getClipMarkers, saveClipMetadata } from "../lib/api";
+import type { ClipSummary, Marker } from "../types";
+import { MarkerList } from "./MarkerList";
 import { TagInput } from "./TagInput";
+import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer";
 
 const SAVE_DEBOUNCE_MS = 1500;
 
@@ -16,16 +19,33 @@ type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelProps) {
   const [tags, setTags] = useState(clip.tags);
   const [notes, setNotes] = useState(clip.notes);
+  const [markers, setMarkers] = useState<Marker[]>([]);
   const [status, setStatus] = useState<SaveStatus>("idle");
   const skipNextSave = useRef(true);
+  const currentTimeRef = useRef(0);
+  const playerRef = useRef<VideoPlayerHandle>(null);
 
   // Switching clips: sync local state from the newly selected clip without
-  // triggering a save of the clip we just navigated away from.
+  // triggering a save of the clip we just navigated away from. Markers aren't
+  // part of ClipSummary (the cache doesn't index them), so they're fetched
+  // separately straight from the sidecar.
   useEffect(() => {
     setTags(clip.tags);
     setNotes(clip.notes);
+    setMarkers([]);
     setStatus("idle");
     skipNextSave.current = true;
+
+    let cancelled = false;
+    getClipMarkers(libraryRoot, clip.id).then((fetched) => {
+      if (cancelled) return;
+      skipNextSave.current = true;
+      setMarkers(fetched);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clip.id]);
 
   useEffect(() => {
@@ -44,6 +64,7 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelP
           contentHash: clip.contentHash,
           tags,
           notes,
+          markers,
         });
         onSaved(updated);
         setStatus("saved");
@@ -54,10 +75,41 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelP
     }, SAVE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tags, notes]);
+  }, [tags, notes, markers]);
+
+  // I marks in, O marks out, on whichever clip is currently loaded in the player.
+  // Uses functional state updates so the handler never closes over a stale
+  // `markers` array and doesn't need to be re-subscribed on every marker edit.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      const key = e.key.toLowerCase();
+      if (key === "i") {
+        e.preventDefault();
+        const t = currentTimeRef.current;
+        setMarkers((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), label: `Marker ${prev.length + 1}`, inSeconds: t, outSeconds: t, notes: "" },
+        ]);
+      } else if (key === "o") {
+        e.preventDefault();
+        const t = currentTimeRef.current;
+        setMarkers((prev) =>
+          prev.length === 0
+            ? prev
+            : prev.map((m, i) => (i === prev.length - 1 ? { ...m, outSeconds: Math.max(t, m.inSeconds) } : m)),
+        );
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-l border-neutral-800 p-4">
+    <aside className="flex w-[420px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-neutral-800 p-4">
       <div>
         <h2 className="truncate text-sm font-medium text-neutral-100" title={clip.filename}>
           {clip.filename}
@@ -65,6 +117,23 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelP
         <p className="mt-1 truncate text-xs text-neutral-500" title={clip.path}>
           {clip.path}
         </p>
+      </div>
+
+      <div>
+        <VideoPlayer
+          key={clip.id}
+          ref={playerRef}
+          src={convertFileSrc(clip.path)}
+          onTimeUpdate={(t) => {
+            currentTimeRef.current = t;
+          }}
+        />
+        <p className="mt-1 text-xs text-neutral-600">Press I to mark in, O to mark out.</p>
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-neutral-400">Markers</label>
+        <MarkerList markers={markers} onChange={setMarkers} onSeek={(t) => playerRef.current?.seek(t)} />
       </div>
 
       <div>
