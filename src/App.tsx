@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ClipDetailPanel } from "./components/ClipDetailPanel";
+import { FilterBar } from "./components/FilterBar";
 import { LibraryGrid } from "./components/LibraryGrid";
 import { getCachedLibrary, pickLibraryFolder, scanLibrary } from "./lib/api";
 import type { ClipSummary } from "./types";
@@ -10,9 +12,11 @@ function App() {
     localStorage.getItem(LAST_LIBRARY_ROOT_KEY),
   );
   const [clips, setClips] = useState<ClipSummary[]>([]);
-  const [selectedClip, setSelectedClip] = useState<ClipSummary | null>(null);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!libraryRoot) return;
@@ -53,10 +57,43 @@ function App() {
     const picked = await pickLibraryFolder();
     if (!picked) return;
     localStorage.setItem(LAST_LIBRARY_ROOT_KEY, picked);
-    setSelectedClip(null);
+    setSelectedClipId(null);
     setClips([]);
+    setSearchQuery("");
+    setActiveTags(new Set());
     setLibraryRoot(picked);
   }
+
+  function handleClipSaved(updated: ClipSummary) {
+    setClips((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+  }
+
+  function toggleTagFilter(tag: string) {
+    setActiveTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }
+
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    clips.forEach((c) => c.tags.forEach((t) => set.add(t)));
+    return Array.from(set).sort();
+  }, [clips]);
+
+  const filteredClips = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return clips.filter((c) => {
+      const matchesQuery =
+        !q || c.filename.toLowerCase().includes(q) || c.tags.some((t) => t.toLowerCase().includes(q));
+      const matchesTags = activeTags.size === 0 || Array.from(activeTags).every((t) => c.tags.includes(t));
+      return matchesQuery && matchesTags;
+    });
+  }, [clips, searchQuery, activeTags]);
+
+  const selectedClip = clips.find((c) => c.id === selectedClipId) ?? null;
 
   return (
     <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
@@ -95,9 +132,19 @@ function App() {
         </div>
       )}
 
+      {libraryRoot && clips.length > 0 && (
+        <FilterBar
+          searchQuery={searchQuery}
+          onSearchQueryChange={setSearchQuery}
+          allTags={allTags}
+          activeTags={activeTags}
+          onToggleTag={toggleTagFilter}
+        />
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         {libraryRoot ? (
-          <LibraryGrid clips={clips} onSelect={setSelectedClip} />
+          <LibraryGrid clips={filteredClips} onSelect={(clip) => setSelectedClipId(clip.id)} />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-neutral-500">
             <p className="text-sm">Select a folder that's already synced by Drive or Dropbox.</p>
@@ -110,16 +157,8 @@ function App() {
           </div>
         )}
 
-        {selectedClip && (
-          <aside className="w-72 shrink-0 border-l border-neutral-800 p-4">
-            <h2 className="truncate text-sm font-medium text-neutral-100">
-              {selectedClip.filename}
-            </h2>
-            <p className="mt-1 truncate text-xs text-neutral-500">{selectedClip.path}</p>
-            <p className="mt-4 text-xs text-neutral-600">
-              Tag editing and notes arrive in Phase 2.
-            </p>
-          </aside>
+        {selectedClip && libraryRoot && (
+          <ClipDetailPanel clip={selectedClip} libraryRoot={libraryRoot} onSaved={handleClipSaved} />
         )}
       </div>
     </div>

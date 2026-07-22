@@ -103,6 +103,20 @@ pub fn read_all_metadata(library_root: &Path) -> Vec<ClipMetadata> {
         .collect()
 }
 
+/// Finds the sidecar that belongs to a scanned file: filename match first (what
+/// teammates actually see and rename around), content hash as a fallback for when
+/// the file has been renamed since the sidecar was last written.
+pub fn find_match<'a>(
+    sidecars: &'a [ClipMetadata],
+    filename: &str,
+    content_hash: &str,
+) -> Option<&'a ClipMetadata> {
+    sidecars
+        .iter()
+        .find(|m| m.filename == filename)
+        .or_else(|| sidecars.iter().find(|m| m.content_hash.as_deref() == Some(content_hash)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +168,24 @@ mod tests {
         assert!(all.is_empty());
 
         fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn find_match_prefers_filename_then_falls_back_to_content_hash() {
+        let sidecars = vec![
+            ClipMetadata::new("id-1".to_string(), "interview.mov".to_string(), Some("hash-a".to_string())),
+            ClipMetadata::new("id-2".to_string(), "b-roll.mp4".to_string(), Some("hash-b".to_string())),
+        ];
+
+        // Exact filename match wins even if hash doesn't match anything.
+        let by_name = find_match(&sidecars, "interview.mov", "unrelated-hash");
+        assert_eq!(by_name.map(|m| m.id.as_str()), Some("id-1"));
+
+        // Renamed file: no filename match, falls back to content hash.
+        let by_hash = find_match(&sidecars, "interview_renamed.mov", "hash-b");
+        assert_eq!(by_hash.map(|m| m.id.as_str()), Some("id-2"));
+
+        // Neither matches.
+        assert!(find_match(&sidecars, "unknown.mp4", "unknown-hash").is_none());
     }
 }

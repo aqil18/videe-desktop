@@ -4,7 +4,8 @@ mod metadata;
 mod scanner;
 
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -20,6 +21,7 @@ pub struct ClipSummary {
     pub path: String,
     pub filename: String,
     pub size: i64,
+    pub content_hash: String,
     pub duration: Option<f64>,
     pub thumbnail_path: Option<String>,
     pub tags: Vec<String>,
@@ -33,6 +35,7 @@ impl From<cache::ClipRow> for ClipSummary {
             path: row.path,
             filename: row.filename,
             size: row.size,
+            content_hash: row.content_hash,
             duration: row.duration,
             thumbnail_path: row.thumbnail_path,
             tags: row.tags,
@@ -63,6 +66,10 @@ async fn scan_library(
     }
 
     let scanned = scanner::scan_videos(root);
+    // Sidecars on disk are the source of truth for tags/notes; a fresh cache (new
+    // machine, or teammate's tags synced down before we ever scanned) must be
+    // reconciled against them rather than starting every clip out untagged.
+    let sidecars = metadata::read_all_metadata(root);
     let thumbnail_dir = app
         .path()
         .app_local_data_dir()
@@ -75,11 +82,14 @@ async fn scan_library(
         let path_str = file.path.to_string_lossy().to_string();
         still_present.push(path_str.clone());
 
-        let id = {
+        let cached_id = {
             let conn = state.db.lock().map_err(|e| e.to_string())?;
             cache::find_id_for_path(&conn, &library_root, &path_str)
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
         };
+        let sidecar_match = metadata::find_match(&sidecars, &file.filename, &file.content_hash);
+        let id = cached_id
+            .or_else(|| sidecar_match.map(|m| m.id.clone()))
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
         let thumbnail_path = thumbnail_dir.join(format!("{id}.jpg"));
         if !thumbnail_path.exists() {
@@ -107,10 +117,10 @@ async fn scan_library(
             thumbnail_path: thumbnail_path
                 .exists()
                 .then(|| thumbnail_path.to_string_lossy().to_string()),
-            tags: Vec::new(),
-            notes: String::new(),
-            author: String::new(),
-            updated_at: String::new(),
+            tags: sidecar_match.map(|m| m.tags.clone()).unwrap_or_default(),
+            notes: sidecar_match.map(|m| m.notes.clone()).unwrap_or_default(),
+            author: sidecar_match.map(|m| m.author.clone()).unwrap_or_default(),
+            updated_at: sidecar_match.map(|m| m.updated_at.clone()).unwrap_or_default(),
         };
 
         let conn = state.db.lock().map_err(|e| e.to_string())?;
@@ -136,6 +146,54 @@ fn get_cached_library(state: State<'_, AppState>, library_root: String) -> Resul
     Ok(rows.into_iter().map(ClipSummary::from).collect())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveClipMetadataInput {
+    library_root: String,
+    id: String,
+    filename: String,
+    content_hash: String,
+    tags: Vec<String>,
+    notes: String,
+}
+
+/// Reads the clip's existing sidecar if one exists (to preserve fields this command
+/// doesn't touch, e.g. markers), merges in the new tags/notes, writes it back
+/// atomically, and updates the cache. Takes a plain `&Connection` so it's testable
+/// without spinning up a Tauri app.
+fn save_clip_metadata_impl(conn: &Connection, input: &SaveClipMetadataInput) -> Result<ClipSummary, String> {
+    let root = Path::new(&input.library_root);
+    let sidecar_path = metadata::sidecar_path(root, &input.id);
+
+    let mut record = metadata::read_metadata(&sidecar_path).unwrap_or_else(|_| {
+        metadata::ClipMetadata::new(input.id.clone(), input.filename.clone(), Some(input.content_hash.clone()))
+    });
+    record.filename = input.filename.clone();
+    record.tags = input.tags.clone();
+    record.notes = input.notes.clone();
+    record.author = metadata::current_user();
+    record.updated_at = metadata::now_iso8601();
+    if record.content_hash.is_none() {
+        record.content_hash = Some(input.content_hash.clone());
+    }
+
+    metadata::write_metadata(root, &record)?;
+
+    cache::update_clip_metadata(conn, &input.id, &record.tags, &record.notes, &record.author, &record.updated_at)?;
+    let rows = cache::list_clips(conn, &input.library_root)?;
+    rows.into_iter()
+        .find(|row| row.id == input.id)
+        .map(ClipSummary::from)
+        .ok_or_else(|| format!("clip {} not found in cache after save", input.id))
+}
+
+/// Called from the (debounced) tag/notes editor.
+#[tauri::command]
+fn save_clip_metadata(state: State<'_, AppState>, input: SaveClipMetadataInput) -> Result<ClipSummary, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    save_clip_metadata_impl(&conn, &input)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -156,7 +214,69 @@ pub fn run() {
             pick_library_folder,
             scan_library,
             get_cached_library,
+            save_clip_metadata,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_library() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("videee-lib-test-{}", uuid::Uuid::new_v4()))
+    }
+
+    #[test]
+    fn save_clip_metadata_writes_sidecar_and_updates_cache() {
+        let root = temp_library();
+        std::fs::create_dir_all(&root).unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        cache::init_schema(&conn).unwrap();
+
+        // The clip must already be in the cache from a prior scan.
+        cache::upsert_clip(
+            &conn,
+            &cache::ClipRow {
+                id: "clip-1".to_string(),
+                library_root: root.to_string_lossy().to_string(),
+                path: root.join("a.mp4").to_string_lossy().to_string(),
+                filename: "a.mp4".to_string(),
+                size: 100,
+                mtime: 0,
+                content_hash: "hash-a".to_string(),
+                duration: Some(5.0),
+                thumbnail_path: None,
+                tags: vec![],
+                notes: String::new(),
+                author: String::new(),
+                updated_at: String::new(),
+            },
+        )
+        .unwrap();
+
+        let input = SaveClipMetadataInput {
+            library_root: root.to_string_lossy().to_string(),
+            id: "clip-1".to_string(),
+            filename: "a.mp4".to_string(),
+            content_hash: "hash-a".to_string(),
+            tags: vec!["b-roll".to_string()],
+            notes: "nice shot".to_string(),
+        };
+
+        let updated = save_clip_metadata_impl(&conn, &input).expect("save should succeed");
+        assert_eq!(updated.tags, vec!["b-roll".to_string()]);
+        assert_eq!(updated.notes, "nice shot");
+        // Filesystem-derived fields from the original scan must survive untouched.
+        assert_eq!(updated.duration, Some(5.0));
+
+        let sidecar_path = metadata::sidecar_path(&root, "clip-1");
+        assert!(sidecar_path.exists());
+        let on_disk = metadata::read_metadata(&sidecar_path).unwrap();
+        assert_eq!(on_disk.tags, vec!["b-roll".to_string()]);
+        assert_eq!(on_disk.content_hash, Some("hash-a".to_string()));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
 }
