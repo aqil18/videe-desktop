@@ -1,8 +1,9 @@
+import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import { ClipDetailPanel } from "./components/ClipDetailPanel";
 import { FilterBar } from "./components/FilterBar";
 import { LibraryGrid } from "./components/LibraryGrid";
-import { getCachedLibrary, pickLibraryFolder, scanLibrary } from "./lib/api";
+import { getCachedLibrary, pickLibraryFolder, scanLibrary, startWatching } from "./lib/api";
 import type { ClipSummary } from "./types";
 
 const LAST_LIBRARY_ROOT_KEY = "videee.lastLibraryRoot";
@@ -36,6 +37,30 @@ function App() {
 
     return () => {
       cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libraryRoot]);
+
+  // Picks up tags/notes a teammate's sync client drops into .metadata/ without
+  // requiring a manual rescan.
+  useEffect(() => {
+    if (!libraryRoot) return;
+
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    listen<ClipSummary>("clip-metadata-changed", (event) => {
+      handleClipSaved(event.payload);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    startWatching(libraryRoot).catch((e) => console.error("failed to start metadata watcher:", e));
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [libraryRoot]);

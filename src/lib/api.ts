@@ -16,3 +16,9 @@ export function getCachedLibrary(libraryRoot: string): Promise<ClipSummary[]> {
 export function saveClipMetadata(input: SaveClipMetadataInput): Promise<ClipSummary> {
   return invoke("save_clip_metadata", { input });
 }
+
+// Starts (or restarts) the backend's `.metadata/` file watcher for this folder.
+// Updates arrive as `clip-metadata-changed` events.
+export function startWatching(libraryRoot: string): Promise<void> {
+  return invoke("start_watching", { libraryRoot });
+}

@@ -2,16 +2,19 @@ mod cache;
 mod ffmpeg;
 mod metadata;
 mod scanner;
+mod watcher;
 
+use notify::RecommendedWatcher;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 pub struct AppState {
     pub db: Mutex<Connection>,
+    pub watcher: Mutex<Option<RecommendedWatcher>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -194,6 +197,16 @@ fn save_clip_metadata(state: State<'_, AppState>, input: SaveClipMetadataInput) 
     save_clip_metadata_impl(&conn, &input)
 }
 
+/// (Re)starts the `.metadata/` watcher for `library_root`. Replacing the previous
+/// watcher (if any) drops it, which stops its background thread.
+#[tauri::command]
+fn start_watching(app: AppHandle, state: State<'_, AppState>, library_root: String) -> Result<(), String> {
+    let new_watcher = watcher::start(app, PathBuf::from(library_root)).map_err(|e| e.to_string())?;
+    let mut guard = state.watcher.lock().map_err(|e| e.to_string())?;
+    *guard = Some(new_watcher);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -207,7 +220,10 @@ pub fn run() {
                 .expect("app_local_data_dir should be available")
                 .join("cache.sqlite");
             let conn = cache::open(&db_path).expect("failed to open local sqlite cache");
-            app.manage(AppState { db: Mutex::new(conn) });
+            app.manage(AppState {
+                db: Mutex::new(conn),
+                watcher: Mutex::new(None),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -215,6 +231,7 @@ pub fn run() {
             scan_library,
             get_cached_library,
             save_clip_metadata,
+            start_watching,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
