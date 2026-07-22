@@ -29,3 +29,6 @@ dist-ssr
 # ffmpeg/ffprobe sidecar binaries (fetched via scripts/fetch-ffmpeg.sh, not committed)
 /src-tauri/binaries/*
 !/src-tauri/binaries/.gitkeep
+
+# Machine-local Claude Code settings
+.claude/settings.local.json
