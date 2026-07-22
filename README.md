@@ -1,6 +1,6 @@
-# Videee
+# Videe
 
-Videee is a local-first video library and tagging tool for video editing teams.
+Videe is a local-first video library and tagging tool for video editing teams.
 It does not upload your footage anywhere and it does not run a server. Instead,
 you point it at a folder that's already being synced by Google Drive, Dropbox,
 or any similar client, and it:
