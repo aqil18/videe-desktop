@@ -90,3 +90,69 @@ pub async fn probe_duration_seconds(app: &AppHandle, video_path: &Path) -> Resul
         .parse::<f64>()
         .map_err(|e| format!("could not parse ffprobe duration: {e}"))
 }
+
+/// Frame rate used when ffprobe can't tell us one (missing video stream, variable
+/// frame rate reported as "0/0", etc). Only affects EDL export timecodes, which need
+/// *some* fps to convert seconds to HH:MM:SS:FF -- 25 is a reasonably neutral default.
+pub const FALLBACK_FPS: f64 = 25.0;
+
+pub async fn probe_frame_rate(app: &AppHandle, video_path: &Path) -> f64 {
+    let Ok(sidecar) = app.shell().sidecar("ffprobe") else {
+        return FALLBACK_FPS;
+    };
+
+    let Ok(output) = sidecar
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=r_frame_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            &video_path.to_string_lossy(),
+        ])
+        .output()
+        .await
+    else {
+        return FALLBACK_FPS;
+    };
+
+    if !output.status.success() {
+        return FALLBACK_FPS;
+    }
+
+    parse_frame_rate(&String::from_utf8_lossy(&output.stdout)).unwrap_or(FALLBACK_FPS)
+}
+
+/// ffprobe reports frame rate as a rational like "30000/1001" or "25/1".
+fn parse_frame_rate(raw: &str) -> Option<f64> {
+    let raw = raw.trim();
+    let (num, den) = raw.split_once('/')?;
+    let num: f64 = num.parse().ok()?;
+    let den: f64 = den.parse().ok()?;
+    if den == 0.0 || !num.is_finite() || !den.is_finite() {
+        return None;
+    }
+    let fps = num / den;
+    (fps > 0.0).then_some(fps)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_common_frame_rate_rationals() {
+        assert_eq!(parse_frame_rate("25/1"), Some(25.0));
+        assert!((parse_frame_rate("30000/1001").unwrap() - 29.97).abs() < 0.01);
+    }
+
+    #[test]
+    fn rejects_zero_and_malformed_rates() {
+        assert_eq!(parse_frame_rate("0/0"), None);
+        assert_eq!(parse_frame_rate("not-a-rate"), None);
+        assert_eq!(parse_frame_rate(""), None);
+    }
+}

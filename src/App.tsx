@@ -3,7 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { ClipDetailPanel } from "./components/ClipDetailPanel";
 import { FilterBar } from "./components/FilterBar";
 import { LibraryGrid } from "./components/LibraryGrid";
-import { getCachedLibrary, pickLibraryFolder, scanLibrary, startWatching } from "./lib/api";
+import {
+  exportClips,
+  getCachedLibrary,
+  pickLibraryFolder,
+  scanLibrary,
+  startWatching,
+  type ExportFormat,
+} from "./lib/api";
 import type { ClipSummary } from "./types";
 
 const LAST_LIBRARY_ROOT_KEY = "videee.lastLibraryRoot";
@@ -18,6 +25,8 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
+  const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     if (!libraryRoot) return;
@@ -86,6 +95,7 @@ function App() {
     setClips([]);
     setSearchQuery("");
     setActiveTags(new Set());
+    setSelectedForExport(new Set());
     setLibraryRoot(picked);
   }
 
@@ -100,6 +110,29 @@ function App() {
       else next.add(tag);
       return next;
     });
+  }
+
+  function toggleClipForExport(id: string) {
+    setSelectedForExport((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleExport(format: ExportFormat) {
+    if (!libraryRoot || selectedForExport.size === 0) return;
+    setIsExporting(true);
+    setError(null);
+    try {
+      const savedPath = await exportClips(libraryRoot, Array.from(selectedForExport), format);
+      if (savedPath) setSelectedForExport(new Set());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   const allTags = useMemo(() => {
@@ -167,9 +200,40 @@ function App() {
         />
       )}
 
+      {selectedForExport.size > 0 && (
+        <div className="flex items-center gap-3 border-b border-neutral-800 bg-neutral-900/60 px-4 py-2">
+          <span className="text-xs text-neutral-400">{selectedForExport.size} selected</span>
+          <button
+            onClick={() => handleExport("csv")}
+            disabled={isExporting}
+            className="rounded-md bg-neutral-800 px-3 py-1 text-xs text-neutral-100 transition hover:bg-neutral-700 disabled:opacity-50"
+          >
+            Export CSV
+          </button>
+          <button
+            onClick={() => handleExport("edl")}
+            disabled={isExporting}
+            className="rounded-md bg-neutral-800 px-3 py-1 text-xs text-neutral-100 transition hover:bg-neutral-700 disabled:opacity-50"
+          >
+            Export EDL
+          </button>
+          <button
+            onClick={() => setSelectedForExport(new Set())}
+            className="text-xs text-neutral-500 transition hover:text-neutral-300"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         {libraryRoot ? (
-          <LibraryGrid clips={filteredClips} onSelect={(clip) => setSelectedClipId(clip.id)} />
+          <LibraryGrid
+            clips={filteredClips}
+            selectedIds={selectedForExport}
+            onSelect={(clip) => setSelectedClipId(clip.id)}
+            onToggleSelect={toggleClipForExport}
+          />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-neutral-500">
             <p className="text-sm">Select a folder that's already synced by Drive or Dropbox.</p>

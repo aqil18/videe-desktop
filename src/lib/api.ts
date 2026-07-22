@@ -27,3 +27,11 @@ export function startWatching(libraryRoot: string): Promise<void> {
 export function getClipMarkers(libraryRoot: string, id: string): Promise<Marker[]> {
   return invoke("get_clip_markers", { libraryRoot, id });
 }
+
+export type ExportFormat = "csv" | "edl";
+
+// Prompts for a save location and writes the export there. Resolves to the chosen
+// path, or null if the user cancelled the save dialog.
+export function exportClips(libraryRoot: string, clipIds: string[], format: ExportFormat): Promise<string | null> {
+  return invoke("export_clips", { input: { libraryRoot, clipIds, format } });
+}

@@ -1,4 +1,5 @@
 mod cache;
+mod export;
 mod ffmpeg;
 mod metadata;
 mod scanner;
@@ -222,6 +223,80 @@ fn start_watching(app: AppHandle, state: State<'_, AppState>, library_root: Stri
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportClipsInput {
+    library_root: String,
+    clip_ids: Vec<String>,
+    format: String,
+}
+
+/// Exports the selected clips as CSV or EDL: one row/event per marker, or one
+/// covering the whole clip if it has no markers, so every selection shows up in
+/// the output even if nobody's marked it up yet. Prompts for a save location and
+/// returns the chosen path, or `None` if the user cancelled the dialog.
+#[tauri::command]
+async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportClipsInput) -> Result<Option<String>, String> {
+    let root = Path::new(&input.library_root);
+
+    let selected: Vec<cache::ClipRow> = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        cache::list_clips(&conn, &input.library_root)?
+            .into_iter()
+            .filter(|row| input.clip_ids.contains(&row.id))
+            .collect()
+    };
+
+    let mut rows = Vec::new();
+    for clip in &selected {
+        let sidecar_path = metadata::sidecar_path(root, &clip.id);
+        let markers = metadata::read_metadata(&sidecar_path).map(|m| m.markers).unwrap_or_default();
+        let fps = ffmpeg::probe_frame_rate(&app, Path::new(&clip.path)).await;
+
+        if markers.is_empty() {
+            rows.push(export::ExportRow {
+                filename: clip.filename.clone(),
+                tags: clip.tags.clone(),
+                marker_label: String::new(),
+                in_seconds: 0.0,
+                out_seconds: clip.duration.unwrap_or(0.0),
+                fps,
+            });
+        } else {
+            for marker in markers {
+                rows.push(export::ExportRow {
+                    filename: clip.filename.clone(),
+                    tags: clip.tags.clone(),
+                    marker_label: marker.label,
+                    in_seconds: marker.in_seconds,
+                    out_seconds: marker.out_seconds,
+                    fps,
+                });
+            }
+        }
+    }
+
+    let (content, default_name, filter_label, extension) = if input.format == "edl" {
+        (export::build_edl("Videee Export", &rows), "videee-export.edl", "EDL", "edl")
+    } else {
+        (export::build_csv(&rows), "videee-export.csv", "CSV", "csv")
+    };
+
+    let picked = app
+        .dialog()
+        .file()
+        .set_file_name(default_name)
+        .add_filter(filter_label, &[extension])
+        .blocking_save_file();
+
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let save_path = picked.as_path().ok_or("save dialog returned an invalid path")?;
+    std::fs::write(save_path, content).map_err(|e| e.to_string())?;
+    Ok(Some(save_path.to_string_lossy().to_string()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -248,6 +323,7 @@ pub fn run() {
             save_clip_metadata,
             get_clip_markers,
             start_watching,
+            export_clips,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
