@@ -21,15 +21,36 @@ writes files on disk; it has no knowledge of Drive/Dropbox accounts or APIs.
 
 ## Project status
 
-This is an MVP being built in phases. Current status:
+This is an MVP built in phases. All five are done:
 
 - [x] Phase 1 — Library scan (folder picker, recursive video scan, ffmpeg
       thumbnails, SQLite cache, library grid)
-- [ ] Phase 2 — Metadata read/write (tag editor, notes, debounced sidecar
+- [x] Phase 2 — Metadata read/write (tag editor, notes, debounced sidecar
       writes, filtering)
-- [ ] Phase 3 — File watching for collaboration
-- [ ] Phase 4 — In/out markers and the video player
-- [ ] Phase 5 — Export (FCPXML/EDL/CSV)
+- [x] Phase 3 — File watching for collaboration
+- [x] Phase 4 — In/out markers and the video player
+- [x] Phase 5 — Export (CSV/EDL — see the note in the Export section below on
+      why FCPXML isn't one of the options)
+
+## Export
+
+Select one or more clips in the library grid (checkbox in the top-left corner
+of each card) and an export bar appears with **Export CSV** and **Export
+EDL** buttons. A native save dialog asks where to put the file.
+
+- **CSV**: one row per marker (filename, tags, marker label, in/out as
+  `HH:MM:SS.mmm`). A clip with no markers exports as a single row covering
+  its full duration, so every selected clip shows up even if untagged.
+- **EDL**: a CMX3600 edit decision list with events laid back-to-back on the
+  record timeline, so importing it into Premiere or Resolve gives you an
+  assembled sequence of the marked ranges, not just a list. Timecodes are
+  frame-accurate (`HH:MM:SS:FF`), using each clip's frame rate probed via
+  ffprobe at export time (falls back to 25fps if a stream's rate can't be read).
+
+This intentionally doesn't export FCPXML. FCPXML's resource/timecode schema
+is easy to get subtly wrong, and a file that silently fails to import is
+worse than one in a simpler format that's actually correct — CSV and EDL
+both import cleanly into Premiere and Resolve today.
 
 ## Metadata schema
 
@@ -83,8 +104,9 @@ src-tauri/src/
   scanner.rs    recursive video file discovery + content fingerprinting
   metadata.rs   .metadata/<clip-id>.json read/write (source of truth)
   cache.rs      SQLite cache (rebuildable index, not source of truth)
-  ffmpeg.rs     thumbnail generation + duration probing via ffmpeg sidecar
-  watcher.rs    notify-based watcher for collaborator changes (added in Phase 3)
+  ffmpeg.rs     thumbnail generation, duration/frame-rate probing via ffmpeg sidecar
+  watcher.rs    notify-based watcher for collaborator changes
+  export.rs     CSV/EDL export builders
 src/
   components/   React components (library grid, clip cards, ...)
   lib/          frontend API wrapper around Tauri commands, formatting helpers
@@ -122,6 +144,6 @@ npm run tauri build
 ## Testing
 
 ```bash
-cd src-tauri && cargo test   # scanner, metadata round-trip, and cache tests
+cd src-tauri && cargo test   # scanner, metadata, cache, watcher, and export tests
 npx tsc --noEmit             # frontend type-checking
 ```
