@@ -15,6 +15,9 @@ already run. There's no account system, no hosted database, and no cloud
 storage owned by this project — the sync provider you already trust with your
 footage is doing all the work.
 
+
+Nobody has stitched these three pieces together — (1) zero-infrastructure collaboration via existing Drive/Dropbox sync, (2) video-specific tagging with in/out marker logging, and (3) direct EDL/CSV export for NLEs — into one open-source tool.
+
 **Requirement:** the folder you select must already be kept in sync by a
 client like Google Drive for Desktop or the Dropbox app. Videee only reads and
 writes files on disk; it has no knowledge of Drive/Dropbox accounts or APIs.
