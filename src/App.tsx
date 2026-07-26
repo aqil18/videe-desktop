@@ -3,11 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { ClipDetailPanel } from "./components/ClipDetailPanel";
 import { FilterBar } from "./components/FilterBar";
 import { LibraryGrid } from "./components/LibraryGrid";
+import { ResolvePanel } from "./components/ResolvePanel";
 import {
   exportClips,
   getCachedLibrary,
   pickLibraryFolder,
   scanLibrary,
+  sendClipsToResolve,
   startWatching,
   type ExportFormat,
 } from "./lib/api";
@@ -27,6 +29,8 @@ function App() {
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
   const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
+  const [isSendingToResolve, setIsSendingToResolve] = useState(false);
+  const [isResolvePanelOpen, setIsResolvePanelOpen] = useState(false);
 
   useEffect(() => {
     if (!libraryRoot) return;
@@ -135,6 +139,20 @@ function App() {
     }
   }
 
+  async function handleSendToResolve() {
+    if (!libraryRoot || selectedForExport.size === 0) return;
+    setIsSendingToResolve(true);
+    setError(null);
+    try {
+      await sendClipsToResolve(libraryRoot, Array.from(selectedForExport));
+      setSelectedForExport(new Set());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIsSendingToResolve(false);
+    }
+  }
+
   const allTags = useMemo(() => {
     const set = new Set<string>();
     clips.forEach((c) => c.tags.forEach((t) => set.add(t)));
@@ -181,6 +199,15 @@ function App() {
               Rescan
             </button>
           )}
+          <div className="relative">
+            <button
+              onClick={() => setIsResolvePanelOpen((open) => !open)}
+              className="rounded-md bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 transition hover:bg-neutral-700"
+            >
+              DaVinci Resolve
+            </button>
+            {isResolvePanelOpen && <ResolvePanel onClose={() => setIsResolvePanelOpen(false)} />}
+          </div>
         </div>
       </header>
 
@@ -216,6 +243,13 @@ function App() {
             className="rounded-md bg-neutral-800 px-3 py-1 text-xs text-neutral-100 transition hover:bg-neutral-700 disabled:opacity-50"
           >
             Export EDL
+          </button>
+          <button
+            onClick={handleSendToResolve}
+            disabled={isSendingToResolve}
+            className="rounded-md bg-neutral-800 px-3 py-1 text-xs text-neutral-100 transition hover:bg-neutral-700 disabled:opacity-50"
+          >
+            {isSendingToResolve ? "Sending…" : "Send to DaVinci"}
           </button>
           <button
             onClick={() => setSelectedForExport(new Set())}

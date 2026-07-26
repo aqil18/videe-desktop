@@ -35,3 +35,27 @@ export type ExportFormat = "csv" | "edl";
 export function exportClips(libraryRoot: string, clipIds: string[], format: ExportFormat): Promise<string | null> {
   return invoke("export_clips", { input: { libraryRoot, clipIds, format } });
 }
+
+// Pure status check for the DaVinci Resolve bridge -- true only if the
+// resolve.lua script is actually running inside Resolve and reachable.
+export function resolvePing(): Promise<boolean> {
+  return invoke("resolve_ping");
+}
+
+// Path the bridge script is installed at, if it's been installed at all.
+export function resolveScriptStatus(): Promise<string | null> {
+  return invoke("resolve_script_status");
+}
+
+// Copies the bundled resolve.lua into Resolve's Utility scripts folder.
+// Resolves to the installed path, or rejects with a user-facing message if
+// Resolve's scripts folder wasn't found (e.g. Resolve isn't installed).
+export function resolveInstallScript(): Promise<string> {
+  return invoke("resolve_install_script");
+}
+
+// Builds an EDL from the selection and hands it to the running resolve.lua
+// bridge to import as a new timeline, using the library folder to relink clips.
+export function sendClipsToResolve(libraryRoot: string, clipIds: string[]): Promise<void> {
+  return invoke("send_clips_to_resolve", { input: { libraryRoot, clipIds } });
+}

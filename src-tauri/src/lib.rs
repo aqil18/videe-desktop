@@ -2,6 +2,7 @@ mod cache;
 mod export;
 mod ffmpeg;
 mod metadata;
+mod resolve_bridge;
 mod scanner;
 mod watcher;
 
@@ -231,27 +232,16 @@ struct ExportClipsInput {
     format: String,
 }
 
-/// Exports the selected clips as CSV or EDL: one row/event per marker, or one
-/// covering the whole clip if it has no markers, so every selection shows up in
-/// the output even if nobody's marked it up yet. Prompts for a save location and
-/// returns the chosen path, or `None` if the user cancelled the dialog.
-#[tauri::command]
-async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportClipsInput) -> Result<Option<String>, String> {
-    let root = Path::new(&input.library_root);
-
-    let selected: Vec<cache::ClipRow> = {
-        let conn = state.db.lock().map_err(|e| e.to_string())?;
-        cache::list_clips(&conn, &input.library_root)?
-            .into_iter()
-            .filter(|row| input.clip_ids.contains(&row.id))
-            .collect()
-    };
-
+/// Builds one `ExportRow` per marker for the given clips, or one row covering the
+/// whole clip if it has no markers, so every selected clip is represented even if
+/// nobody's marked it up yet. Shared by the file-export command and the "send to
+/// DaVinci" bridge so the marker-gathering/fps-probing logic isn't duplicated.
+async fn build_export_rows(app: &AppHandle, root: &Path, selected: &[cache::ClipRow]) -> Vec<export::ExportRow> {
     let mut rows = Vec::new();
-    for clip in &selected {
+    for clip in selected {
         let sidecar_path = metadata::sidecar_path(root, &clip.id);
         let markers = metadata::read_metadata(&sidecar_path).map(|m| m.markers).unwrap_or_default();
-        let fps = ffmpeg::probe_frame_rate(&app, Path::new(&clip.path)).await;
+        let fps = ffmpeg::probe_frame_rate(app, Path::new(&clip.path)).await;
 
         if markers.is_empty() {
             rows.push(export::ExportRow {
@@ -275,6 +265,24 @@ async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportC
             }
         }
     }
+    rows
+}
+
+fn selected_clip_rows(state: &State<'_, AppState>, library_root: &str, clip_ids: &[String]) -> Result<Vec<cache::ClipRow>, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(cache::list_clips(&conn, library_root)?
+        .into_iter()
+        .filter(|row| clip_ids.contains(&row.id))
+        .collect())
+}
+
+/// Exports the selected clips as CSV or EDL. Prompts for a save location and
+/// returns the chosen path, or `None` if the user cancelled the dialog.
+#[tauri::command]
+async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportClipsInput) -> Result<Option<String>, String> {
+    let root = Path::new(&input.library_root);
+    let selected = selected_clip_rows(&state, &input.library_root, &input.clip_ids)?;
+    let rows = build_export_rows(&app, root, &selected).await;
 
     let (content, default_name, filter_label, extension) = if input.format == "edl" {
         (export::build_edl("Videee Export", &rows), "videee-export.edl", "EDL", "edl")
@@ -295,6 +303,51 @@ async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportC
     let save_path = picked.as_path().ok_or("save dialog returned an invalid path")?;
     std::fs::write(save_path, content).map_err(|e| e.to_string())?;
     Ok(Some(save_path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+async fn resolve_ping() -> bool {
+    resolve_bridge::ping().await
+}
+
+#[tauri::command]
+fn resolve_script_status() -> Option<String> {
+    resolve_bridge::script_status().map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn resolve_install_script(app: AppHandle) -> Result<String, String> {
+    resolve_bridge::install_script(&app).map(|p| p.to_string_lossy().to_string())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SendClipsToResolveInput {
+    library_root: String,
+    clip_ids: Vec<String>,
+}
+
+/// Builds an EDL for the selection, same as `export_clips`, but instead of a save
+/// dialog it hands the file to the `resolve.lua` bridge running inside DaVinci
+/// Resolve via `ImportTimelineFromFile`, using the synced library folder as the
+/// clip-relinking source.
+#[tauri::command]
+async fn send_clips_to_resolve(app: AppHandle, state: State<'_, AppState>, input: SendClipsToResolveInput) -> Result<(), String> {
+    let root = Path::new(&input.library_root);
+    let selected = selected_clip_rows(&state, &input.library_root, &input.clip_ids)?;
+    let rows = build_export_rows(&app, root, &selected).await;
+    let content = export::build_edl("Videee Export", &rows);
+
+    let temp_path = std::env::temp_dir().join(format!("videee-resolve-{}.edl", uuid::Uuid::new_v4()));
+    std::fs::write(&temp_path, content).map_err(|e| e.to_string())?;
+
+    let timeline_name = format!("Videee Export {}", metadata::now_iso8601());
+    let result = resolve_bridge::import_edl(&temp_path, root, &timeline_name)
+        .await
+        .map_err(|e| e.to_string());
+
+    std::fs::remove_file(&temp_path).ok();
+    result
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -324,6 +377,10 @@ pub fn run() {
             get_clip_markers,
             start_watching,
             export_clips,
+            resolve_ping,
+            resolve_script_status,
+            resolve_install_script,
+            send_clips_to_resolve,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
