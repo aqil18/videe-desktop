@@ -3,7 +3,7 @@ Videee <-> DaVinci Resolve bridge.
 
 Install: click "Install Script" in Videee's DaVinci Resolve panel, which copies
 this file into Resolve's Utility scripts folder. Run it from inside Resolve via
-Workspace > Scripts > Utility > resolve. It then listens on 127.0.0.1 and waits
+Workspace > Scripts > Utility > Videe. It then listens on 127.0.0.1 and waits
 for Videee to ask it to import an EDL -- Videee is the client, this script is
 the server, and it only ever does one thing: import a timeline into whichever
 project is currently open.
@@ -1465,7 +1465,7 @@ end
 
 local function import_edl(path, source_clips_path, timeline_name)
     if not resolve then
-        return false, "This script must be run from inside DaVinci Resolve (Workspace > Scripts > Utility > resolve)"
+        return false, "This script must be run from inside DaVinci Resolve (Workspace > Scripts > Utility > Videe)"
     end
 
     local project_manager = resolve:GetProjectManager()

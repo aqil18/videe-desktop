@@ -1,5 +1,5 @@
-//! Client for the `videee.lua` bridge script that runs inside DaVinci Resolve
-//! (Workspace > Scripts > Utility > resolve). The Lua script is the server; we're
+//! Client for the `Videe.lua` bridge script that runs inside DaVinci Resolve
+//! (Workspace > Scripts > Utility > Videe). The Lua script is the server; we're
 //! the client, calling it synchronously exactly when the user clicks a button --
 //! no job queue, no polling loop on either side. That's a deliberate departure
 //! from a naive "Rust runs a server, Lua polls it" design: it mirrors the proven
@@ -41,7 +41,7 @@ impl fmt::Display for BridgeError {
         match self {
             BridgeError::NotRunning => write!(
                 f,
-                "DaVinci Resolve isn't running the Videee bridge script. In Resolve: Workspace \u{2192} Scripts \u{2192} Utility \u{2192} resolve."
+                "DaVinci Resolve isn't running the Videee bridge script. In Resolve: Workspace \u{2192} Scripts \u{2192} Utility \u{2192} Videe."
             ),
             BridgeError::Timeout => write!(f, "DaVinci Resolve didn't respond in time. Is it busy?"),
             BridgeError::ResolveError(msg) => write!(f, "{msg}"),
@@ -118,12 +118,12 @@ pub async fn import_edl(edl_path: &Path, source_clips_path: &Path, timeline_name
     }
 }
 
-/// Where the bundled `resolve.lua` ships inside the app, so it can be copied out
+/// Where the bundled `Videe.lua` ships inside the app, so it can be copied out
 /// to Resolve's scripts folder.
 pub fn bundled_script_path(app: &AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     app.path()
-        .resolve("resolve.lua", tauri::path::BaseDirectory::Resource)
+        .resolve("Videe.lua", tauri::path::BaseDirectory::Resource)
         .map_err(|e| e.to_string())
 }
 
@@ -142,7 +142,7 @@ pub fn install_target_path() -> Result<PathBuf, String> {
             .join("Fusion")
             .join("Scripts")
             .join("Utility")
-            .join("resolve.lua")
+            .join("Videe.lua")
     } else if cfg!(target_os = "macos") {
         data_dir
             .join("Blackmagic Design")
@@ -150,14 +150,14 @@ pub fn install_target_path() -> Result<PathBuf, String> {
             .join("Fusion")
             .join("Scripts")
             .join("Utility")
-            .join("resolve.lua")
+            .join("Videe.lua")
     } else {
         data_dir
             .join("DaVinciResolve")
             .join("Fusion")
             .join("Scripts")
             .join("Utility")
-            .join("resolve.lua")
+            .join("Videe.lua")
     };
     Ok(path)
 }

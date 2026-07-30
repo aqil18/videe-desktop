@@ -75,7 +75,7 @@ export function ResolvePanel({ onClose }: ResolvePanelProps) {
         </div>
 
         <p className="border-t border-neutral-800 pt-3 text-neutral-500">
-          In DaVinci Resolve: Workspace → Scripts → Utility → resolve to start the bridge, then use "Send to
+          In DaVinci Resolve: Workspace → Scripts → Utility → Videe to start the bridge, then use "Send to
           DaVinci" from the library grid.
         </p>
       </div>

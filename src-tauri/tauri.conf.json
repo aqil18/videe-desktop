@@ -37,7 +37,7 @@
     ],
     "externalBin": ["binaries/ffmpeg", "binaries/ffprobe"],
     "resources": {
-      "../integrations/resolve/resolve.lua": "resolve.lua"
+      "../integrations/resolve/Videe.lua": "Videe.lua"
     }
   }
 }

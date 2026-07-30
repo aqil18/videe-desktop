@@ -37,7 +37,7 @@ export function exportClips(libraryRoot: string, clipIds: string[], format: Expo
 }
 
 // Pure status check for the DaVinci Resolve bridge -- true only if the
-// resolve.lua script is actually running inside Resolve and reachable.
+// Videe.lua script is actually running inside Resolve and reachable.
 export function resolvePing(): Promise<boolean> {
   return invoke("resolve_ping");
 }
@@ -47,14 +47,14 @@ export function resolveScriptStatus(): Promise<string | null> {
   return invoke("resolve_script_status");
 }
 
-// Copies the bundled resolve.lua into Resolve's Utility scripts folder.
+// Copies the bundled Videe.lua into Resolve's Utility scripts folder.
 // Resolves to the installed path, or rejects with a user-facing message if
 // Resolve's scripts folder wasn't found (e.g. Resolve isn't installed).
 export function resolveInstallScript(): Promise<string> {
   return invoke("resolve_install_script");
 }
 
-// Builds an EDL from the selection and hands it to the running resolve.lua
+// Builds an EDL from the selection and hands it to the running Videe.lua
 // bridge to import as a new timeline, using the library folder to relink clips.
 export function sendClipsToResolve(libraryRoot: string, clipIds: string[]): Promise<void> {
   return invoke("send_clips_to_resolve", { input: { libraryRoot, clipIds } });

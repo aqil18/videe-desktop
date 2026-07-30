@@ -328,7 +328,7 @@ struct SendClipsToResolveInput {
 }
 
 /// Builds an EDL for the selection, same as `export_clips`, but instead of a save
-/// dialog it hands the file to the `resolve.lua` bridge running inside DaVinci
+/// dialog it hands the file to the `Videe.lua` bridge running inside DaVinci
 /// Resolve via `ImportTimelineFromFile`, using the synced library folder as the
 /// clip-relinking source.
 #[tauri::command]
