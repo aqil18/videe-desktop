@@ -8,6 +8,9 @@ export interface ClipSummary {
   thumbnailPath: string | null;
   tags: string[];
   notes: string;
+  // Probed once during scan; always a usable number (real probe or the
+  // backend's fallback default), never absent.
+  fps: number;
 }
 
 export interface Marker {

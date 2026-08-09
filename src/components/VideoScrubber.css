@@ -1,0 +1,23 @@
+/*
+ * The Regions plugin renders its resize handles and region wrapper as plain
+ * DOM elements with `part` attributes as styling hooks (not classes, and not
+ * inside a shadow root -- plain attribute selectors reach them fine). This is
+ * the one place in the app that needs real CSS instead of Tailwind: Tailwind
+ * can't target DOM a third-party library creates internally.
+ *
+ * The handles' border color is set inline by the plugin (hardcoded black),
+ * so overriding it requires !important -- that's not a specificity mistake,
+ * it's the only way to win against an inline style from outside the library.
+ */
+
+.videee-waveform [part~="region-handle"] {
+  border-color: rgba(229, 229, 229, 0.6) !important; /* neutral-200 */
+}
+
+.videee-waveform [part~="region"] {
+  border-radius: 3px;
+}
+
+.videee-waveform [part~="region-content"] {
+  pointer-events: none;
+}
