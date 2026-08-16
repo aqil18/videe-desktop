@@ -157,11 +157,28 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
             content: makeRegionLabel(marker.label),
           });
         } else {
-          if (region.start !== marker.inSeconds || region.end !== marker.outSeconds) {
-            region.setOptions({ start: marker.inSeconds, end: marker.outSeconds });
-          }
-          if (region.getContent(false) !== marker.label) {
-            region.setContent(makeRegionLabel(marker.label));
+          const wasPoint = region.start === region.end;
+          const willBePoint = marker.inSeconds === marker.outSeconds;
+          if (wasPoint !== willBePoint) {
+            // wavesurfer's Region only builds its fill color and resize handles
+            // once, at construction, based on start===end at that moment --
+            // setOptions() repositions but never upgrades a point marker into a
+            // filled region (or vice versa). Recreate so the DOM matches reality.
+            region.remove();
+            regions.addRegion({
+              id: marker.id,
+              start: marker.inSeconds,
+              end: marker.outSeconds,
+              color: REGION_COLOR,
+              content: makeRegionLabel(marker.label),
+            });
+          } else {
+            if (region.start !== marker.inSeconds || region.end !== marker.outSeconds) {
+              region.setOptions({ start: marker.inSeconds, end: marker.outSeconds });
+            }
+            if (region.getContent(false) !== marker.label) {
+              region.setContent(makeRegionLabel(marker.label));
+            }
           }
           existing.delete(marker.id);
         }
