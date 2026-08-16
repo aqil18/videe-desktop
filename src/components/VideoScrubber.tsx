@@ -49,10 +49,37 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
   // WebKitGTK (Linux) has historically lagged Chromium/Safari on newer video
   // APIs -- feature-detect rather than assume parity across platforms.
   const [rvfcSupported] = useState(() => "requestVideoFrameCallback" in HTMLVideoElement.prototype);
+  // Many MP4s (moov atom at the end -- common for non-"web-optimized" exports)
+  // report video.duration as Infinity until the browser performs a real seek.
+  // wavesurfer.getDuration() proxies the native element's duration directly,
+  // and each Region caches it once at creation as its totalDuration -- if a
+  // region is created while that's Infinity, start/Infinity=0 forever, so it
+  // renders collapsed at position 0 no matter what happens afterward. Gate
+  // region creation on the native element itself (not wavesurfer's "ready",
+  // which is tied to full peak-decode and can lag far behind) so we never hit
+  // that trap.
+  const [hasSaneDuration, setHasSaneDuration] = useState(false);
 
   useEffect(() => {
     markersRef.current = markers;
   }, [markers]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    function checkDuration() {
+      if (video && Number.isFinite(video.duration) && video.duration > 0) {
+        setHasSaneDuration(true);
+      }
+    }
+    checkDuration();
+    video.addEventListener("loadedmetadata", checkDuration);
+    video.addEventListener("durationchange", checkDuration);
+    return () => {
+      video.removeEventListener("loadedmetadata", checkDuration);
+      video.removeEventListener("durationchange", checkDuration);
+    };
+  }, []);
 
   useImperativeHandle(ref, () => ({
     seek(seconds: number) {
@@ -141,7 +168,7 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
   // being mistaken for user-created regions by the region-created listener.
   useEffect(() => {
     const regions = regionsRef.current;
-    if (!regions) return;
+    if (!regions || !hasSaneDuration) return;
 
     isApplyingExternalMarkers.current = true;
     try {
@@ -191,7 +218,7 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
     } finally {
       isApplyingExternalMarkers.current = false;
     }
-  }, [markers]);
+  }, [markers, hasSaneDuration]);
 
   function stepFrame(direction: 1 | -1) {
     const video = videoRef.current;
