@@ -21,3 +21,15 @@
 .videee-waveform [part~="region-content"] {
   pointer-events: none;
 }
+
+/*
+ * Unlike the elements above, the playhead cursor lives inside wavesurfer's own
+ * shadow root, so a plain attribute selector can't reach it -- ::part() is the
+ * one thing that pierces shadow encapsulation for styling. It shares the
+ * shadow-internal stylesheet's z-index (5) with the regions container, and
+ * loses the tie because regions mount after it, so it needs a bump here to
+ * stay drawn on top of region fills instead of getting covered by them.
+ */
+.videee-waveform > div::part(cursor) {
+  z-index: 10 !important;
+}

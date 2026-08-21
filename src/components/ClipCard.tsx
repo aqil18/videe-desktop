@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ClipSummary } from "../types";
+import { colorForLabel, withAlpha } from "../lib/color";
 import { formatDuration, formatFileSize } from "../lib/format";
 
 interface ClipCardProps {
@@ -55,11 +56,19 @@ export function ClipCard({ clip, selected, onSelect, onToggleSelect }: ClipCardP
           <span className="text-xs text-neutral-500">{formatFileSize(clip.size)}</span>
           {clip.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1">
-              {clip.tags.map((tag) => (
-                <span key={tag} className="rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300">
-                  {tag}
-                </span>
-              ))}
+              {clip.tags.map((tag) => {
+                const color = colorForLabel(tag);
+                return (
+                  <span
+                    key={tag}
+                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs text-neutral-300"
+                    style={{ backgroundColor: withAlpha(color, 0.15), border: `1px solid ${withAlpha(color, 0.45)}` }}
+                  >
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                    {tag}
+                  </span>
+                );
+              })}
             </div>
           )}
         </div>

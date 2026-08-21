@@ -1,3 +1,5 @@
+import { colorForLabel, withAlpha } from "../lib/color";
+
 interface FilterBarProps {
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
@@ -25,16 +27,19 @@ export function FilterBar({
         <div className="flex flex-wrap items-center gap-1.5">
           {allTags.map((tag) => {
             const active = activeTags.has(tag);
+            const color = colorForLabel(tag);
             return (
               <button
                 key={tag}
                 onClick={() => onToggleTag(tag)}
-                className={`rounded-full px-2.5 py-0.5 text-xs transition ${
+                className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs transition ${
                   active
                     ? "bg-neutral-100 text-neutral-900"
                     : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
                 }`}
+                style={{ border: `1px solid ${withAlpha(color, active ? 0.7 : 0.45)}` }}
               >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
                 {tag}
               </button>
             );

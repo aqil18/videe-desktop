@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/plugins/regions";
+import { colorForLabel, withAlpha } from "../lib/color";
 import { formatFrameTimecode, frameNumber } from "../lib/format";
 import type { Marker } from "../types";
 import "./VideoScrubber.css";
@@ -20,15 +21,8 @@ interface VideoScrubberProps {
 // renders the waveform to <canvas> -- these genuinely can't be Tailwind classes.
 const WAVE_COLOR = "#525252"; // neutral-600
 const PROGRESS_COLOR = "#a3a3a3"; // neutral-400
-const CURSOR_COLOR = "#e5e5e5"; // neutral-200
+const CURSOR_COLOR = "#fafafa"; // neutral-50 -- bright so the playhead reads over any region fill
 const REGION_COLOR = "rgba(163, 163, 163, 0.25)"; // neutral-400 @ 25%
-
-function makeRegionLabel(label: string): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "rounded-sm bg-black/60 px-1 text-[10px] text-neutral-100";
-  el.textContent = label;
-  return el;
-}
 
 export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>(function VideoScrubber(
   { src, fps, markers, onMarkersChange },
@@ -97,11 +91,11 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
     const wavesurfer = WaveSurfer.create({
       container: waveformRef.current,
       media: videoRef.current,
-      height: 64,
+      height: 30,
       waveColor: WAVE_COLOR,
       progressColor: PROGRESS_COLOR,
       cursorColor: CURSOR_COLOR,
-      cursorWidth: 1,
+      cursorWidth: 2,
       barWidth: 2,
       barGap: 1,
       barRadius: 1,
@@ -175,13 +169,13 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
       const existing = new Map(regions.getRegions().map((r) => [r.id, r]));
       for (const marker of markers) {
         const region = existing.get(marker.id);
+        const color = withAlpha(colorForLabel(marker.label), 0.28);
         if (!region) {
           regions.addRegion({
             id: marker.id,
             start: marker.inSeconds,
             end: marker.outSeconds,
-            color: REGION_COLOR,
-            content: makeRegionLabel(marker.label),
+            color,
           });
         } else {
           const wasPoint = region.start === region.end;
@@ -196,15 +190,14 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
               id: marker.id,
               start: marker.inSeconds,
               end: marker.outSeconds,
-              color: REGION_COLOR,
-              content: makeRegionLabel(marker.label),
+              color,
             });
           } else {
             if (region.start !== marker.inSeconds || region.end !== marker.outSeconds) {
               region.setOptions({ start: marker.inSeconds, end: marker.outSeconds });
             }
-            if (region.getContent(false) !== marker.label) {
-              region.setContent(makeRegionLabel(marker.label));
+            if (region.color !== color) {
+              region.setOptions({ color });
             }
           }
           existing.delete(marker.id);
