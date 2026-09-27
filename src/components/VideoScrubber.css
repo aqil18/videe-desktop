@@ -32,4 +32,6 @@
  */
 .videee-waveform > div::part(cursor) {
   z-index: 10 !important;
+  background-color: red;
+  width: 3px;
 }
