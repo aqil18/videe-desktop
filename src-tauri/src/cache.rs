@@ -31,11 +31,23 @@ pub(crate) fn init_schema(conn: &Connection) -> Result<(), String> {
             notes TEXT NOT NULL DEFAULT '',
             author TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL DEFAULT '',
+            fps REAL NOT NULL DEFAULT 25.0,
             UNIQUE(library_root, path)
         );
         CREATE INDEX IF NOT EXISTS idx_clips_library_root ON clips(library_root);",
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    // Best-effort migration for databases created before the fps column existed.
+    // Fails harmlessly with "duplicate column name" on any DB that already has it
+    // (including brand-new ones from the CREATE TABLE above).
+    match conn.execute("ALTER TABLE clips ADD COLUMN fps REAL NOT NULL DEFAULT 25.0", []) {
+        Ok(_) => {}
+        Err(e) if e.to_string().contains("duplicate column") => {}
+        Err(e) => return Err(e.to_string()),
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,6 +65,10 @@ pub struct ClipRow {
     pub notes: String,
     pub author: String,
     pub updated_at: String,
+    /// Probed once during scan (see ffmpeg::probe_frame_rate) and never `None` --
+    /// unlike duration, the probe always falls back to a usable default rather
+    /// than failing, so there's no "unknown fps" state to represent.
+    pub fps: f64,
 }
 
 /// Looks up the clip id already assigned to this path (from a previous scan) so
@@ -69,8 +85,8 @@ pub fn find_id_for_path(conn: &Connection, library_root: &str, path: &str) -> Op
 pub fn upsert_clip(conn: &Connection, row: &ClipRow) -> Result<(), String> {
     let tags_json = serde_json::to_string(&row.tags).map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO clips (id, library_root, path, filename, size, mtime, content_hash, duration, thumbnail_path, tags, notes, author, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+        "INSERT INTO clips (id, library_root, path, filename, size, mtime, content_hash, duration, thumbnail_path, tags, notes, author, updated_at, fps)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(library_root, path) DO UPDATE SET
             id = excluded.id,
             filename = excluded.filename,
@@ -82,7 +98,8 @@ pub fn upsert_clip(conn: &Connection, row: &ClipRow) -> Result<(), String> {
             tags = excluded.tags,
             notes = excluded.notes,
             author = excluded.author,
-            updated_at = excluded.updated_at",
+            updated_at = excluded.updated_at,
+            fps = excluded.fps",
         params![
             row.id,
             row.library_root,
@@ -97,6 +114,7 @@ pub fn upsert_clip(conn: &Connection, row: &ClipRow) -> Result<(), String> {
             row.notes,
             row.author,
             row.updated_at,
+            row.fps,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -125,7 +143,7 @@ pub fn update_clip_metadata(
 pub fn list_clips(conn: &Connection, library_root: &str) -> Result<Vec<ClipRow>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, library_root, path, filename, size, mtime, content_hash, duration, thumbnail_path, tags, notes, author, updated_at
+            "SELECT id, library_root, path, filename, size, mtime, content_hash, duration, thumbnail_path, tags, notes, author, updated_at, fps
              FROM clips WHERE library_root = ?1 ORDER BY filename COLLATE NOCASE",
         )
         .map_err(|e| e.to_string())?;
@@ -148,6 +166,7 @@ pub fn list_clips(conn: &Connection, library_root: &str) -> Result<Vec<ClipRow>,
                 notes: row.get(10)?,
                 author: row.get(11)?,
                 updated_at: row.get(12)?,
+                fps: row.get(13)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -198,6 +217,7 @@ mod tests {
             notes: String::new(),
             author: String::new(),
             updated_at: String::new(),
+            fps: 24.0,
         }
     }
 
@@ -261,5 +281,23 @@ mod tests {
         assert_eq!(found[0].tags, vec!["b-roll".to_string()]);
         assert_eq!(found[0].notes, "great take");
         assert_eq!(found[0].size, 1024); // untouched
+        assert_eq!(found[0].fps, 24.0); // untouched -- fps is filesystem-derived, not metadata
+    }
+
+    #[test]
+    fn fps_survives_round_trip_and_migration_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        // init_schema runs the ALTER TABLE migration path even on a fresh DB
+        // where the column already exists from CREATE TABLE -- calling it again
+        // must not error.
+        init_schema(&conn).unwrap();
+
+        let mut row = sample_row("clip-1", "/library/a.mp4");
+        row.fps = 29.97;
+        upsert_clip(&conn, &row).unwrap();
+
+        let found = list_clips(&conn, "/library").unwrap();
+        assert_eq!(found[0].fps, 29.97);
     }
 }

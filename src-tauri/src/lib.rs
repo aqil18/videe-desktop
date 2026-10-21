@@ -31,6 +31,9 @@ pub struct ClipSummary {
     pub thumbnail_path: Option<String>,
     pub tags: Vec<String>,
     pub notes: String,
+    /// Probed once during scan; always a usable number (real probe or the
+    /// fallback default), never absent -- see cache::ClipRow::fps.
+    pub fps: f64,
 }
 
 impl From<cache::ClipRow> for ClipSummary {
@@ -45,6 +48,7 @@ impl From<cache::ClipRow> for ClipSummary {
             thumbnail_path: row.thumbnail_path,
             tags: row.tags,
             notes: row.notes,
+            fps: row.fps,
         }
     }
 }
@@ -109,6 +113,9 @@ async fn scan_library(
                 e
             })
             .ok();
+        // Unlike probe_duration_seconds, probe_frame_rate never fails -- it
+        // always returns a usable number, falling back to FALLBACK_FPS itself.
+        let fps = ffmpeg::probe_frame_rate(&app, &file.path).await;
 
         let row = cache::ClipRow {
             id,
@@ -126,6 +133,7 @@ async fn scan_library(
             notes: sidecar_match.map(|m| m.notes.clone()).unwrap_or_default(),
             author: sidecar_match.map(|m| m.author.clone()).unwrap_or_default(),
             updated_at: sidecar_match.map(|m| m.updated_at.clone()).unwrap_or_default(),
+            fps,
         };
 
         let conn = state.db.lock().map_err(|e| e.to_string())?;
@@ -236,12 +244,11 @@ struct ExportClipsInput {
 /// whole clip if it has no markers, so every selected clip is represented even if
 /// nobody's marked it up yet. Shared by the file-export command and the "send to
 /// DaVinci" bridge so the marker-gathering/fps-probing logic isn't duplicated.
-async fn build_export_rows(app: &AppHandle, root: &Path, selected: &[cache::ClipRow]) -> Vec<export::ExportRow> {
+fn build_export_rows(root: &Path, selected: &[cache::ClipRow]) -> Vec<export::ExportRow> {
     let mut rows = Vec::new();
     for clip in selected {
         let sidecar_path = metadata::sidecar_path(root, &clip.id);
         let markers = metadata::read_metadata(&sidecar_path).map(|m| m.markers).unwrap_or_default();
-        let fps = ffmpeg::probe_frame_rate(app, Path::new(&clip.path)).await;
 
         if markers.is_empty() {
             rows.push(export::ExportRow {
@@ -250,7 +257,7 @@ async fn build_export_rows(app: &AppHandle, root: &Path, selected: &[cache::Clip
                 marker_label: String::new(),
                 in_seconds: 0.0,
                 out_seconds: clip.duration.unwrap_or(0.0),
-                fps,
+                fps: clip.fps,
             });
         } else {
             for marker in markers {
@@ -260,7 +267,7 @@ async fn build_export_rows(app: &AppHandle, root: &Path, selected: &[cache::Clip
                     marker_label: marker.label,
                     in_seconds: marker.in_seconds,
                     out_seconds: marker.out_seconds,
-                    fps,
+                    fps: clip.fps,
                 });
             }
         }
@@ -282,7 +289,7 @@ fn selected_clip_rows(state: &State<'_, AppState>, library_root: &str, clip_ids:
 async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportClipsInput) -> Result<Option<String>, String> {
     let root = Path::new(&input.library_root);
     let selected = selected_clip_rows(&state, &input.library_root, &input.clip_ids)?;
-    let rows = build_export_rows(&app, root, &selected).await;
+    let rows = build_export_rows(root, &selected);
 
     let (content, default_name, filter_label, extension) = if input.format == "edl" {
         (export::build_edl("Videee Export", &rows), "videee-export.edl", "EDL", "edl")
@@ -332,10 +339,10 @@ struct SendClipsToResolveInput {
 /// Resolve via `ImportTimelineFromFile`, using the synced library folder as the
 /// clip-relinking source.
 #[tauri::command]
-async fn send_clips_to_resolve(app: AppHandle, state: State<'_, AppState>, input: SendClipsToResolveInput) -> Result<(), String> {
+async fn send_clips_to_resolve(state: State<'_, AppState>, input: SendClipsToResolveInput) -> Result<(), String> {
     let root = Path::new(&input.library_root);
     let selected = selected_clip_rows(&state, &input.library_root, &input.clip_ids)?;
-    let rows = build_export_rows(&app, root, &selected).await;
+    let rows = build_export_rows(root, &selected);
     let content = export::build_edl("Videee Export", &rows);
 
     let temp_path = std::env::temp_dir().join(format!("videee-resolve-{}.edl", uuid::Uuid::new_v4()));
@@ -418,6 +425,7 @@ mod tests {
                 notes: String::new(),
                 author: String::new(),
                 updated_at: String::new(),
+                fps: 25.0,
             },
         )
         .unwrap();

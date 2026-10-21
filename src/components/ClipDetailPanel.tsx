@@ -4,7 +4,7 @@ import { getClipMarkers, saveClipMetadata } from "../lib/api";
 import type { ClipSummary, Marker } from "../types";
 import { MarkerList } from "./MarkerList";
 import { TagInput } from "./TagInput";
-import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer";
+import { VideoScrubber, type VideoScrubberHandle } from "./VideoScrubber";
 
 const SAVE_DEBOUNCE_MS = 1500;
 
@@ -22,8 +22,7 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelP
   const [markers, setMarkers] = useState<Marker[]>([]);
   const [status, setStatus] = useState<SaveStatus>("idle");
   const skipNextSave = useRef(true);
-  const currentTimeRef = useRef(0);
-  const playerRef = useRef<VideoPlayerHandle>(null);
+  const scrubberRef = useRef<VideoScrubberHandle>(null);
 
   // Switching clips: sync local state from the newly selected clip without
   // triggering a save of the clip we just navigated away from. Markers aren't
@@ -77,37 +76,6 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tags, notes, markers]);
 
-  // I marks in, O marks out, on whichever clip is currently loaded in the player.
-  // Uses functional state updates so the handler never closes over a stale
-  // `markers` array and doesn't need to be re-subscribed on every marker edit.
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-      const key = e.key.toLowerCase();
-      if (key === "i") {
-        e.preventDefault();
-        const t = currentTimeRef.current;
-        setMarkers((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), label: `Marker ${prev.length + 1}`, inSeconds: t, outSeconds: t, notes: "" },
-        ]);
-      } else if (key === "o") {
-        e.preventDefault();
-        const t = currentTimeRef.current;
-        setMarkers((prev) =>
-          prev.length === 0
-            ? prev
-            : prev.map((m, i) => (i === prev.length - 1 ? { ...m, outSeconds: Math.max(t, m.inSeconds) } : m)),
-        );
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
   return (
     <aside className="flex w-[420px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-neutral-800 p-4">
       <div>
@@ -119,21 +87,18 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelP
         </p>
       </div>
 
-      <div>
-        <VideoPlayer
-          key={clip.id}
-          ref={playerRef}
-          src={convertFileSrc(clip.path)}
-          onTimeUpdate={(t) => {
-            currentTimeRef.current = t;
-          }}
-        />
-        <p className="mt-1 text-xs text-neutral-600">Press I to mark in, O to mark out.</p>
-      </div>
+      <VideoScrubber
+        key={clip.id}
+        ref={scrubberRef}
+        src={convertFileSrc(clip.path)}
+        fps={clip.fps}
+        markers={markers}
+        onMarkersChange={setMarkers}
+      />
 
       <div>
         <label className="mb-1.5 block text-xs font-medium text-neutral-400">Markers</label>
-        <MarkerList markers={markers} onChange={setMarkers} onSeek={(t) => playerRef.current?.seek(t)} />
+        <MarkerList markers={markers} onChange={setMarkers} onSeek={(t) => scrubberRef.current?.seek(t)} />
       </div>
 
       <div>

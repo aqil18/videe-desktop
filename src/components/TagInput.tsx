@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { colorForLabel, withAlpha } from "../lib/color";
 
 interface TagInputProps {
   tags: string[];
@@ -22,21 +23,26 @@ export function TagInput({ tags, onChange }: TagInputProps) {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-neutral-800 bg-neutral-900 p-2">
-      {tags.map((tag) => (
-        <span
-          key={tag}
-          className="flex items-center gap-1 rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-200"
-        >
-          {tag}
-          <button
-            onClick={() => removeTag(tag)}
-            aria-label={`Remove tag ${tag}`}
-            className="text-neutral-500 transition hover:text-neutral-200"
+      {tags.map((tag) => {
+        const color = colorForLabel(tag);
+        return (
+          <span
+            key={tag}
+            className="flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs text-neutral-200"
+            style={{ backgroundColor: withAlpha(color, 0.15), border: `1px solid ${withAlpha(color, 0.45)}` }}
           >
-            ×
-          </button>
-        </span>
-      ))}
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+            {tag}
+            <button
+              onClick={() => removeTag(tag)}
+              aria-label={`Remove tag ${tag}`}
+              className="text-neutral-500 transition hover:text-neutral-200"
+            >
+              ×
+            </button>
+          </span>
+        );
+      })}
       <input
         value={draft}
         onChange={(e) => setDraft(e.currentTarget.value)}
