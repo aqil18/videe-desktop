@@ -95,7 +95,7 @@ async fn handle_sidecar_change(
         ReadOutcome::Deleted => apply_or_clear(&app, &library_root, &id, None),
         ReadOutcome::Superseded => {}
         ReadOutcome::GaveUp => {
-            eprintln!("videee: gave up waiting for {path:?} to become readable after {MAX_READ_ATTEMPTS} attempts");
+            eprintln!("videe: gave up waiting for {path:?} to become readable after {MAX_READ_ATTEMPTS} attempts");
         }
     }
 }
@@ -176,7 +176,7 @@ mod tests {
     use std::fs;
 
     fn temp_sidecar_path() -> PathBuf {
-        std::env::temp_dir().join(format!("videee-watcher-test-{}.json", uuid::Uuid::new_v4()))
+        std::env::temp_dir().join(format!("videe-watcher-test-{}.json", uuid::Uuid::new_v4()))
     }
 
     #[tokio::test]

@@ -19,7 +19,7 @@ footage is doing all the work.
 Nobody has stitched these three pieces together — (1) zero-infrastructure collaboration via existing Drive/Dropbox sync, (2) video-specific tagging with in/out marker logging, and (3) direct EDL/CSV export for NLEs — into one open-source tool.
 
 **Requirement:** the folder you select must already be kept in sync by a
-client like Google Drive for Desktop or the Dropbox app. Videee only reads and
+client like Google Drive for Desktop or the Dropbox app. Videe only reads and
 writes files on disk; it has no knowledge of Drive/Dropbox accounts or APIs.
 
 ## Project status
@@ -57,7 +57,7 @@ both import cleanly into Premiere and Resolve today.
 
 ## Metadata schema
 
-For each video file, Videee stores `.metadata/<clip-id>.json` next to it in
+For each video file, Videe stores `.metadata/<clip-id>.json` next to it in
 the library folder:
 
 ```json
@@ -88,7 +88,7 @@ and reason about; the hash is a resilience mechanism, not the source of truth.
 
 The local SQLite cache (`cache.sqlite` in the app's local data directory, never
 inside the synced folder) is a rebuildable index over these JSON files — if you
-delete it, Videee reconstructs it from disk on the next scan. It is not the
+delete it, Videe reconstructs it from disk on the next scan. It is not the
 source of truth.
 
 ## Tech stack
@@ -124,7 +124,7 @@ Prerequisites:
 - ffmpeg + ffprobe installed locally (`brew install ffmpeg` on macOS,
   `apt install ffmpeg` on Debian/Ubuntu, `choco install ffmpeg` on Windows)
 
-Videee bundles ffmpeg/ffprobe as Tauri "sidecar" binaries rather than shelling
+Videe bundles ffmpeg/ffprobe as Tauri "sidecar" binaries rather than shelling
 out to whatever happens to be on `PATH` at runtime. Those binaries aren't
 committed to the repo — they're large, platform-specific, and their
 redistribution terms depend on which codecs are enabled in the build. Instead,

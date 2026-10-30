@@ -1,10 +1,10 @@
 --[[
-Videee <-> DaVinci Resolve bridge.
+Videe <-> DaVinci Resolve bridge.
 
-Install: click "Install Script" in Videee's DaVinci Resolve panel, which copies
+Install: click "Install Script" in Videe's DaVinci Resolve panel, which copies
 this file into Resolve's Utility scripts folder. Run it from inside Resolve via
 Workspace > Scripts > Utility > Videe. It then listens on 127.0.0.1 and waits
-for Videee to ask it to import an EDL -- Videee is the client, this script is
+for Videe to ask it to import an EDL -- Videe is the client, this script is
 the server, and it only ever does one thing: import a timeline into whichever
 project is currently open.
 
@@ -1558,21 +1558,21 @@ end
 
 local server, bind_err = ljsocket.bind("127.0.0.1", tostring(PORT))
 if not server then
-    print("Videee bridge: failed to bind 127.0.0.1:" .. PORT .. " (" .. tostring(bind_err) .. "). Already running?")
+    print("Videe bridge: failed to bind 127.0.0.1:" .. PORT .. " (" .. tostring(bind_err) .. "). Already running?")
     return
 end
 
 server:listen()
 server:set_blocking(false)
 
-print("Videee bridge listening on 127.0.0.1:" .. PORT)
+print("Videe bridge listening on 127.0.0.1:" .. PORT)
 
 while true do
     local client = server:accept()
     if client then
         local ok, err = pcall(handle_client, client)
         if not ok then
-            print("Videee bridge: error handling request: " .. tostring(err))
+            print("Videe bridge: error handling request: " .. tostring(err))
         end
     else
         sleep_ms(100)

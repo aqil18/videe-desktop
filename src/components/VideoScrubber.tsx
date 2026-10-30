@@ -290,7 +290,7 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
   return (
     <div className="flex flex-col gap-1">
       <video ref={videoRef} src={src} className="w-full rounded-t-md bg-black" />
-      <div ref={waveformRef} className="videee-waveform rounded-b-md bg-neutral-900" />
+      <div ref={waveformRef} className="videe-waveform rounded-b-md bg-neutral-900" />
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2 text-neutral-500">
           <button

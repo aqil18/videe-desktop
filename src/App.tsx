@@ -15,7 +15,7 @@ import {
 } from "./lib/api";
 import type { ClipSummary } from "./types";
 
-const LAST_LIBRARY_ROOT_KEY = "videee.lastLibraryRoot";
+const LAST_LIBRARY_ROOT_KEY = "videe.lastLibraryRoot";
 
 function App() {
   const [libraryRoot, setLibraryRoot] = useState<string | null>(() =>
@@ -176,7 +176,7 @@ function App() {
       <header className="flex items-center justify-between gap-4 border-b border-neutral-800 px-4 py-3">
         <div className="flex items-center gap-3 overflow-hidden">
           <h1 className="shrink-0 text-sm font-semibold tracking-wide text-neutral-300">
-            Videee
+            Videe
           </h1>
           <span className="truncate text-xs text-neutral-500">
             {libraryRoot ?? "No folder selected"}

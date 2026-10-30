@@ -10,15 +10,15 @@
  * it's the only way to win against an inline style from outside the library.
  */
 
-.videee-waveform [part~="region-handle"] {
+.videe-waveform [part~="region-handle"] {
   border-color: rgba(229, 229, 229, 0.6) !important; /* neutral-200 */
 }
 
-.videee-waveform [part~="region"] {
+.videe-waveform [part~="region"] {
   border-radius: 3px;
 }
 
-.videee-waveform [part~="region-content"] {
+.videe-waveform [part~="region-content"] {
   pointer-events: none;
 }
 
@@ -30,7 +30,7 @@
  * loses the tie because regions mount after it, so it needs a bump here to
  * stay drawn on top of region fills instead of getting covered by them.
  */
-.videee-waveform > div::part(cursor) {
+.videe-waveform > div::part(cursor) {
   z-index: 10 !important;
   background-color: red;
   width: 3px;

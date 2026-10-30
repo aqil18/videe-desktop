@@ -292,9 +292,9 @@ async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportC
     let rows = build_export_rows(root, &selected);
 
     let (content, default_name, filter_label, extension) = if input.format == "edl" {
-        (export::build_edl("Videee Export", &rows), "videee-export.edl", "EDL", "edl")
+        (export::build_edl("Videe Export", &rows), "videe-export.edl", "EDL", "edl")
     } else {
-        (export::build_csv(&rows), "videee-export.csv", "CSV", "csv")
+        (export::build_csv(&rows), "videe-export.csv", "CSV", "csv")
     };
 
     let picked = app
@@ -343,12 +343,12 @@ async fn send_clips_to_resolve(state: State<'_, AppState>, input: SendClipsToRes
     let root = Path::new(&input.library_root);
     let selected = selected_clip_rows(&state, &input.library_root, &input.clip_ids)?;
     let rows = build_export_rows(root, &selected);
-    let content = export::build_edl("Videee Export", &rows);
+    let content = export::build_edl("Videe Export", &rows);
 
-    let temp_path = std::env::temp_dir().join(format!("videee-resolve-{}.edl", uuid::Uuid::new_v4()));
+    let temp_path = std::env::temp_dir().join(format!("videe-resolve-{}.edl", uuid::Uuid::new_v4()));
     std::fs::write(&temp_path, content).map_err(|e| e.to_string())?;
 
-    let timeline_name = format!("Videee Export {}", metadata::now_iso8601());
+    let timeline_name = format!("Videe Export {}", metadata::now_iso8601());
     let result = resolve_bridge::import_edl(&temp_path, root, &timeline_name)
         .await
         .map_err(|e| e.to_string());
@@ -398,7 +398,7 @@ mod tests {
     use super::*;
 
     fn temp_library() -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("videee-lib-test-{}", uuid::Uuid::new_v4()))
+        std::env::temp_dir().join(format!("videe-lib-test-{}", uuid::Uuid::new_v4()))
     }
 
     #[test]

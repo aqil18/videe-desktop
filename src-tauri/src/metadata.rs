@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn round_trips_metadata_through_disk() {
-        let tmp = std::env::temp_dir().join(format!("videee-metadata-test-{}", uuid::Uuid::new_v4()));
+        let tmp = std::env::temp_dir().join(format!("videe-metadata-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&tmp).unwrap();
 
         let mut metadata = ClipMetadata::new(
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn skips_unparseable_sidecar_files() {
-        let tmp = std::env::temp_dir().join(format!("videee-metadata-test-{}", uuid::Uuid::new_v4()));
+        let tmp = std::env::temp_dir().join(format!("videe-metadata-test-{}", uuid::Uuid::new_v4()));
         let meta_dir = metadata_dir(&tmp);
         fs::create_dir_all(&meta_dir).unwrap();
         // Simulate a zero-byte placeholder from a cloud-sync client mid-download.

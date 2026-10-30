@@ -41,7 +41,7 @@ impl fmt::Display for BridgeError {
         match self {
             BridgeError::NotRunning => write!(
                 f,
-                "DaVinci Resolve isn't running the Videee bridge script. In Resolve: Workspace \u{2192} Scripts \u{2192} Utility \u{2192} Videe."
+                "DaVinci Resolve isn't running the Videe bridge script. In Resolve: Workspace \u{2192} Scripts \u{2192} Utility \u{2192} Videe."
             ),
             BridgeError::Timeout => write!(f, "DaVinci Resolve didn't respond in time. Is it busy?"),
             BridgeError::ResolveError(msg) => write!(f, "{msg}"),
