@@ -37,7 +37,9 @@
     ],
     "externalBin": ["binaries/ffmpeg", "binaries/ffprobe"],
     "resources": {
-      "../integrations/resolve/Videe.lua": "Videe.lua"
+      "../integrations/resolve/Videe.lua": "Videe.lua",
+      "binaries/ffmpeg-COPYING.LGPLv2.1": "licenses/ffmpeg/COPYING.LGPLv2.1",
+      "binaries/ffmpeg-build.txt": "licenses/ffmpeg/BUILD.txt"
     }
   }
 }

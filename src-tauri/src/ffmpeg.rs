@@ -1,5 +1,5 @@
 //! Wraps the bundled ffmpeg/ffprobe sidecar binaries for thumbnail generation and
-//! duration probing. See scripts/fetch-ffmpeg.sh for how those binaries get onto disk.
+//! duration probing. See scripts/build-ffmpeg.sh for how those binaries get onto disk.
 
 use std::path::Path;
 use tauri::AppHandle;
