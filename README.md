@@ -119,22 +119,23 @@ src/
 
 Prerequisites:
 
+- macOS on Apple Silicon (the only supported platform for now)
+- Xcode Command Line Tools (`xcode-select --install`)
 - [Rust](https://rustup.rs/) (stable toolchain)
 - Node.js 18+
-- ffmpeg + ffprobe installed locally (`brew install ffmpeg` on macOS,
-  `apt install ffmpeg` on Debian/Ubuntu, `choco install ffmpeg` on Windows)
 
-Videe bundles ffmpeg/ffprobe as Tauri "sidecar" binaries rather than shelling
-out to whatever happens to be on `PATH` at runtime. Those binaries aren't
-committed to the repo — they're large, platform-specific, and their
-redistribution terms depend on which codecs are enabled in the build. Instead,
-a setup script copies your local ffmpeg/ffprobe install into
-`src-tauri/binaries/` with the naming convention Tauri's sidecar mechanism
-expects:
+Videe bundles ffmpeg/ffprobe as Tauri "sidecar" binaries at runtime. Those binaries aren't
+committed to the repo. Instead, a setup script downloads a pinned ffmpeg source
+release, builds minimal statically linked ffmpeg/ffprobe with only the codecs
+Videe needs, and installs them into `src-tauri/binaries/` with the naming
+convention Tauri's sidecar mechanism expects. The script fails if either binary
+depends on anything outside macOS's system libraries, so the app runs on Macs
+without Homebrew. The first run takes a minute or two; later runs are skipped
+unless the pinned version or build flags change (`--force` rebuilds).
 
 ```bash
 npm install
-npm run setup:ffmpeg   # copies system ffmpeg/ffprobe into src-tauri/binaries/
+npm run setup:ffmpeg   # builds ffmpeg/ffprobe into src-tauri/binaries/
 npm run tauri dev
 ```
 
@@ -143,6 +144,15 @@ To produce a release build:
 ```bash
 npm run tauri build
 ```
+
+### Third-party: FFmpeg
+
+Videe ships [FFmpeg](https://ffmpeg.org) 9.0.2 (`ffmpeg` and `ffprobe`), built
+without GPL components and licensed under the LGPL v2.1 or later. The exact
+source is <https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz>, and the configure
+flags live in [`scripts/build-ffmpeg.sh`](scripts/build-ffmpeg.sh). Each app
+bundle includes the license text and build details under
+`Contents/Resources/licenses/ffmpeg/`.
 
 ## Testing
 

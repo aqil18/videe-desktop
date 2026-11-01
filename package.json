@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "setup:ffmpeg": "bash scripts/fetch-ffmpeg.sh",
+    "setup:ffmpeg": "bash scripts/build-ffmpeg.sh",
     "test": "vitest run"
   },
   "dependencies": {
