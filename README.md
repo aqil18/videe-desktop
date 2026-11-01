@@ -22,18 +22,6 @@ Nobody has stitched these three pieces together — (1) zero-infrastructure coll
 client like Google Drive for Desktop or the Dropbox app. Videe only reads and
 writes files on disk; it has no knowledge of Drive/Dropbox accounts or APIs.
 
-## Project status
-
-This is an MVP built in phases. All five are done:
-
-- [x] Phase 1 — Library scan (folder picker, recursive video scan, ffmpeg
-      thumbnails, SQLite cache, library grid)
-- [x] Phase 2 — Metadata read/write (tag editor, notes, debounced sidecar
-      writes, filtering)
-- [x] Phase 3 — File watching for collaboration
-- [x] Phase 4 — In/out markers and the video player
-- [x] Phase 5 — Export (CSV/EDL — see the note in the Export section below on
-      why FCPXML isn't one of the options)
 
 ## Export
 
