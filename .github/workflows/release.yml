@@ -1,0 +1,60 @@
+name: Release
+
+# Pushing a version tag builds the Apple Silicon DMG and publishes it as a GitHub Release.
+# The tag must match "version" in src-tauri/tauri.conf.json (v0.2.0 for 0.2.0).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Apple Silicon, which scripts/build-ffmpeg.sh requires.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The DMG name and the version the app reports both come from tauri.conf.json.
+      - name: Check tag matches app version
+        run: |
+          version="$(jq -r .version src-tauri/tauri.conf.json)"
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match tauri.conf.json version $version"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run setup:ffmpeg
+
+      # Ad-hoc signing ("-") needs no Apple account. Without a signature that covers the
+      # whole bundle, macOS reports a downloaded app as "damaged" instead of unverified.
+      - name: Build app
+        run: npm run tauri build
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+
+      # Runs after the build because compiling the crate needs the sidecars and ../dist.
+      - name: Run Rust tests
+        run: cargo test
+        working-directory: src-tauri
+
+      - name: Publish release
+        run: |
+          gh release create "$GITHUB_REF_NAME" src-tauri/target/release/bundle/dmg/*.dmg \
+            --verify-tag \
+            --generate-notes \
+            --notes "Requires an Apple Silicon Mac. This build isn't notarized, so macOS blocks it the first time: try to open Videe, then choose **Open Anyway** in System Settings > Privacy & Security."
+        env:
+          GH_TOKEN: ${{ github.token }}

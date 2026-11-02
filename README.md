@@ -133,6 +133,22 @@ To produce a release build:
 npm run tauri build
 ```
 
+### Releasing
+
+Pushing a version tag runs [`release.yml`](.github/workflows/release.yml), which
+runs the tests, builds the Apple Silicon DMG, and publishes it as a GitHub Release
+with generated notes. The tag must match `version` in `src-tauri/tauri.conf.json`,
+so bump that first (and `package.json` and `src-tauri/Cargo.toml` to keep them in
+step), then:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Builds are ad-hoc signed, not notarized, so macOS blocks the app on first launch
+until it's allowed under System Settings > Privacy & Security.
+
 ### Third-party: FFmpeg
 
 Videe ships [FFmpeg](https://ffmpeg.org) 9.0.2 (`ffmpeg` and `ffprobe`), built
