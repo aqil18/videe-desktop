@@ -252,7 +252,12 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
 
       const wavesurfer = wavesurferRef.current;
       if (!wavesurfer) return;
-
+      
+      if (e.code === "Space") {
+        e.preventDefault(); // stops page scroll and a focused button also firing
+        if (!e.repeat) wavesurfer.playPause(); // holding space won't rapidly toggle
+        return;
+      }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         stepFrame(-1);
