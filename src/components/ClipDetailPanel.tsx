@@ -1,9 +1,11 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getClipMarkers, saveClipMetadata } from "../lib/api";
 import type { ClipSummary, Marker } from "../types";
 import { MarkerList } from "./MarkerList";
 import { TagInput } from "./TagInput";
+import { TagTemplates } from "./TagTemplates";
 import { VideoScrubber, type VideoScrubberHandle } from "./VideoScrubber";
 
 const SAVE_DEBOUNCE_MS = 1500;
@@ -12,11 +14,12 @@ interface ClipDetailPanelProps {
   clip: ClipSummary;
   libraryRoot: string;
   onSaved: (clip: ClipSummary) => void;
+  templatesSlot: HTMLElement | null;
 }
 
 type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 
-export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelProps) {
+export function ClipDetailPanel({ clip, libraryRoot, onSaved, templatesSlot }: ClipDetailPanelProps) {
   const [tags, setTags] = useState(clip.tags);
   const [notes, setNotes] = useState(clip.notes);
   const [markers, setMarkers] = useState<Marker[]>([]);
@@ -104,6 +107,9 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelP
       <div>
         <label className="mb-1.5 block text-xs font-medium text-neutral-400">Tags</label>
         <TagInput tags={tags} onChange={setTags} />
+        {/* Rendered into the app header, but it edits this panel's tag state so
+            template additions go through the same debounced save as typed tags. */}
+        {templatesSlot && createPortal(<TagTemplates tags={tags} onChange={setTags} />, templatesSlot)}
       </div>
 
       <div className="flex flex-1 flex-col">

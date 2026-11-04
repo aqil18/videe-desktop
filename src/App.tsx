@@ -4,6 +4,7 @@ import { ClipDetailPanel } from "./components/ClipDetailPanel";
 import { FilterBar } from "./components/FilterBar";
 import { LibraryGrid } from "./components/LibraryGrid";
 import { ResolvePanel } from "./components/ResolvePanel";
+import { TagTemplates } from "./components/TagTemplates";
 import {
   exportClips,
   getCachedLibrary,
@@ -31,6 +32,7 @@ function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [isSendingToResolve, setIsSendingToResolve] = useState(false);
   const [isResolvePanelOpen, setIsResolvePanelOpen] = useState(false);
+  const [templatesSlot, setTemplatesSlot] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!libraryRoot) return;
@@ -199,6 +201,8 @@ function App() {
               Rescan
             </button>
           )}
+          {!selectedClip && <TagTemplates tags={[]} onChange={() => {}} disabled />}
+          <div ref={setTemplatesSlot} className="contents" />
           <div className="relative">
             <button
               onClick={() => setIsResolvePanelOpen((open) => !open)}
@@ -281,7 +285,12 @@ function App() {
         )}
 
         {selectedClip && libraryRoot && (
-          <ClipDetailPanel clip={selectedClip} libraryRoot={libraryRoot} onSaved={handleClipSaved} />
+          <ClipDetailPanel
+            clip={selectedClip}
+            libraryRoot={libraryRoot}
+            onSaved={handleClipSaved}
+            templatesSlot={templatesSlot}
+          />
         )}
       </div>
     </div>
