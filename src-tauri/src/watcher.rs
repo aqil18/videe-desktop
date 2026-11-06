@@ -41,6 +41,11 @@ pub fn start(app: AppHandle, library_root: PathBuf) -> notify::Result<Recommende
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
+            // Library settings, not a clip sidecar -- would otherwise be retried
+            // as an unparseable clip until the watcher gives up.
+            if path.file_name().and_then(|n| n.to_str()) == Some(metadata::PROJECT_FILE_NAME) {
+                continue;
+            }
 
             let generation = {
                 let mut map = generations.lock().unwrap();

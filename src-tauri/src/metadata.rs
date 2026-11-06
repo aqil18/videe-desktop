@@ -88,6 +88,42 @@ pub fn write_metadata(library_root: &Path, metadata: &ClipMetadata) -> Result<()
     Ok(())
 }
 
+/// Library-wide settings, stored beside the clip sidecars so they sync to teammates
+/// the same way. Not a clip: `read_all_metadata` skips it because it doesn't parse
+/// as `ClipMetadata`, and the watcher ignores it by name.
+pub const PROJECT_FILE_NAME: &str = "project.json";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ProjectSettings {
+    /// Tags offered for the whole library (e.g. added from a tag template), as
+    /// opposed to the tags actually applied to an individual clip.
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+pub fn project_path(library_root: &Path) -> PathBuf {
+    metadata_dir(library_root).join(PROJECT_FILE_NAME)
+}
+
+/// Missing or unreadable file means "no project settings yet", not an error.
+pub fn read_project(library_root: &Path) -> ProjectSettings {
+    fs::read_to_string(project_path(library_root))
+        .ok()
+        .and_then(|contents| serde_json::from_str(&contents).ok())
+        .unwrap_or_default()
+}
+
+/// Atomic for the same reason as `write_metadata`.
+pub fn write_project(library_root: &Path, project: &ProjectSettings) -> Result<(), String> {
+    let dir = metadata_dir(library_root);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let tmp_path = dir.join(format!(".{PROJECT_FILE_NAME}.tmp"));
+    let json = serde_json::to_string_pretty(project).map_err(|e| e.to_string())?;
+    fs::write(&tmp_path, json).map_err(|e| e.to_string())?;
+    fs::rename(&tmp_path, project_path(library_root)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Reads every sidecar file in `.metadata/`, skipping files that fail to parse
 /// (e.g. a zero-byte placeholder left by a cloud-sync client mid-download).
 pub fn read_all_metadata(library_root: &Path) -> Vec<ClipMetadata> {
@@ -166,6 +202,28 @@ mod tests {
 
         let all = read_all_metadata(&tmp);
         assert!(all.is_empty());
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn project_settings_round_trip_and_are_not_read_as_clips() {
+        let tmp = std::env::temp_dir().join(format!("videe-metadata-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&tmp).unwrap();
+
+        // No file yet: empty defaults rather than an error.
+        assert_eq!(read_project(&tmp), ProjectSettings::default());
+
+        let project = ProjectSettings {
+            tags: vec!["Cinematic".to_string(), "Needs review".to_string()],
+        };
+        write_project(&tmp, &project).expect("write should succeed");
+        assert_eq!(read_project(&tmp), project);
+
+        write_metadata(&tmp, &ClipMetadata::new("clip-1".to_string(), "a.mov".to_string(), None)).unwrap();
+        let all = read_all_metadata(&tmp);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, "clip-1");
 
         fs::remove_dir_all(&tmp).ok();
     }

@@ -6,12 +6,12 @@ const TAG_TEMPLATES = [
 ];
 
 interface TagTemplatesProps {
+  /** The project's tag list -- templates add to this, not to a clip. */
   tags: string[];
   onChange: (tags: string[]) => void;
-  disabled?: boolean;
 }
 
-export function TagTemplates({ tags, onChange, disabled = false }: TagTemplatesProps) {
+export function TagTemplates({ tags, onChange }: TagTemplatesProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -24,17 +24,15 @@ export function TagTemplates({ tags, onChange, disabled = false }: TagTemplatesP
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
-  // Case-insensitive so a hand-typed "cinematic" isn't duplicated by "Cinematic".
+  // Case-insensitive so an existing "cinematic" isn't duplicated by "Cinematic".
   const existing = new Set(tags.map((t) => t.toLowerCase()));
 
   return (
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        disabled={disabled}
         aria-expanded={open}
-        title={disabled ? "Select a clip to add tag templates" : undefined}
-        className="flex items-center gap-1.5 rounded-md bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 transition hover:bg-neutral-700 disabled:opacity-50 disabled:hover:bg-neutral-800"
+        className="flex items-center gap-1.5 rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-xs text-neutral-300 transition hover:border-neutral-600 hover:text-neutral-100"
       >
         Tag Templates
         <span aria-hidden className={`transition-transform ${open ? "rotate-90" : ""}`}>
@@ -43,7 +41,7 @@ export function TagTemplates({ tags, onChange, disabled = false }: TagTemplatesP
       </button>
 
       {open && (
-        <ul className="absolute right-0 top-full z-20 mt-1 flex w-48 flex-col gap-0.5 rounded-lg border border-neutral-800 bg-neutral-900 p-1 shadow-xl">
+        <ul className="absolute left-0 top-full z-20 mt-1 flex w-48 flex-col gap-0.5 rounded-lg border border-neutral-800 bg-neutral-900 p-1 shadow-xl">
           {TAG_TEMPLATES.map((template) => {
             const missing = template.tags.filter((t) => !existing.has(t.toLowerCase()));
             return (
