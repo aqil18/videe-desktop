@@ -93,6 +93,7 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved, projectTags }: Cli
         ref={scrubberRef}
         src={convertFileSrc(clip.path)}
         fps={clip.fps}
+        duration={clip.duration}
         markers={markers}
         onMarkersChange={setMarkers}
       />
