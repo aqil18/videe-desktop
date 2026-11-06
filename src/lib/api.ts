@@ -28,6 +28,15 @@ export function getClipMarkers(libraryRoot: string, id: string): Promise<Marker[
   return invoke("get_clip_markers", { libraryRoot, id });
 }
 
+// Library-wide tag list (from tag templates), stored in .metadata/project.json.
+export function getProjectTags(libraryRoot: string): Promise<string[]> {
+  return invoke("get_project_tags", { libraryRoot });
+}
+
+export function saveProjectTags(libraryRoot: string, tags: string[]): Promise<void> {
+  return invoke("save_project_tags", { libraryRoot, tags });
+}
+
 export type ExportFormat = "csv" | "edl";
 
 // Prompts for a save location and writes the export there. Resolves to the chosen

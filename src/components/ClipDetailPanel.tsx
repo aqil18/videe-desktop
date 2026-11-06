@@ -12,11 +12,12 @@ interface ClipDetailPanelProps {
   clip: ClipSummary;
   libraryRoot: string;
   onSaved: (clip: ClipSummary) => void;
+  projectTags: string[];
 }
 
 type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 
-export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelProps) {
+export function ClipDetailPanel({ clip, libraryRoot, onSaved, projectTags }: ClipDetailPanelProps) {
   const [tags, setTags] = useState(clip.tags);
   const [notes, setNotes] = useState(clip.notes);
   const [markers, setMarkers] = useState<Marker[]>([]);
@@ -103,7 +104,7 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved }: ClipDetailPanelP
 
       <div>
         <label className="mb-1.5 block text-xs font-medium text-neutral-400">Tags</label>
-        <TagInput tags={tags} onChange={setTags} />
+        <TagInput tags={tags} onChange={setTags} suggestions={projectTags} />
       </div>
 
       <div className="flex flex-1 flex-col">

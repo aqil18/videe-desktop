@@ -222,6 +222,21 @@ fn get_clip_markers(library_root: String, id: String) -> Result<Vec<metadata::Ma
     }
 }
 
+#[tauri::command]
+fn get_project_tags(library_root: String) -> Vec<String> {
+    metadata::read_project(Path::new(&library_root)).tags
+}
+
+/// Sync (not async) so Tauri runs these one at a time in call order -- two quick
+/// edits can't race and leave the older list on disk.
+#[tauri::command]
+fn save_project_tags(library_root: String, tags: Vec<String>) -> Result<(), String> {
+    let root = Path::new(&library_root);
+    let mut project = metadata::read_project(root);
+    project.tags = tags;
+    metadata::write_project(root, &project)
+}
+
 /// (Re)starts the `.metadata/` watcher for `library_root`. Replacing the previous
 /// watcher (if any) drops it, which stops its background thread.
 #[tauri::command]
@@ -382,6 +397,8 @@ pub fn run() {
             get_cached_library,
             save_clip_metadata,
             get_clip_markers,
+            get_project_tags,
+            save_project_tags,
             start_watching,
             export_clips,
             resolve_ping,

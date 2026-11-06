@@ -7,7 +7,9 @@ import { ResolvePanel } from "./components/ResolvePanel";
 import {
   exportClips,
   getCachedLibrary,
+  getProjectTags,
   pickLibraryFolder,
+  saveProjectTags,
   scanLibrary,
   sendClipsToResolve,
   startWatching,
@@ -31,6 +33,7 @@ function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [isSendingToResolve, setIsSendingToResolve] = useState(false);
   const [isResolvePanelOpen, setIsResolvePanelOpen] = useState(false);
+  const [projectTags, setProjectTags] = useState<string[]>([]);
 
   useEffect(() => {
     if (!libraryRoot) return;
@@ -52,6 +55,19 @@ function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libraryRoot]);
+
+  useEffect(() => {
+    if (!libraryRoot) return;
+    let cancelled = false;
+    getProjectTags(libraryRoot)
+      .then((tags) => {
+        if (!cancelled) setProjectTags(tags);
+      })
+      .catch((e) => console.error("failed to load project tags:", e));
+    return () => {
+      cancelled = true;
+    };
   }, [libraryRoot]);
 
   // Picks up tags/notes a teammate's sync client drops into .metadata/ without
@@ -100,7 +116,25 @@ function App() {
     setSearchQuery("");
     setActiveTags(new Set());
     setSelectedForExport(new Set());
+    setProjectTags([]);
     setLibraryRoot(picked);
+  }
+
+  function updateProjectTags(next: string[]) {
+    if (!libraryRoot) return;
+    setProjectTags(next);
+    // A removed project tag that no clip uses vanishes from the filter bar, so an
+    // active filter on it would leave the grid empty with no chip to switch it off.
+    const nextSet = new Set(next);
+    const orphaned = projectTags.filter((t) => !nextSet.has(t) && !clipTags.has(t));
+    if (orphaned.length > 0) {
+      setActiveTags((prev) => {
+        const updated = new Set(prev);
+        orphaned.forEach((t) => updated.delete(t));
+        return updated;
+      });
+    }
+    saveProjectTags(libraryRoot, next).catch((e) => setError(`Failed to save project tags: ${e}`));
   }
 
   function handleClipSaved(updated: ClipSummary) {
@@ -153,11 +187,16 @@ function App() {
     }
   }
 
-  const allTags = useMemo(() => {
+  const clipTags = useMemo(() => {
     const set = new Set<string>();
     clips.forEach((c) => c.tags.forEach((t) => set.add(t)));
-    return Array.from(set).sort();
+    return set;
   }, [clips]);
+
+  const allTags = useMemo(
+    () => Array.from(new Set([...clipTags, ...projectTags])).sort(),
+    [clipTags, projectTags],
+  );
 
   const filteredClips = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -224,6 +263,8 @@ function App() {
           allTags={allTags}
           activeTags={activeTags}
           onToggleTag={toggleTagFilter}
+          projectTags={projectTags}
+          onProjectTagsChange={updateProjectTags}
         />
       )}
 
@@ -281,7 +322,12 @@ function App() {
         )}
 
         {selectedClip && libraryRoot && (
-          <ClipDetailPanel clip={selectedClip} libraryRoot={libraryRoot} onSaved={handleClipSaved} />
+          <ClipDetailPanel
+            clip={selectedClip}
+            libraryRoot={libraryRoot}
+            onSaved={handleClipSaved}
+            projectTags={projectTags}
+          />
         )}
       </div>
     </div>
