@@ -13,6 +13,8 @@ export interface VideoScrubberHandle {
 interface VideoScrubberProps {
   src: string;
   fps: number;
+  /** Probed by ffprobe at scan time; null if that probe failed. */
+  duration: number | null;
   markers: Marker[];
   onMarkersChange: (markers: Marker[]) => void;
 }
@@ -24,8 +26,17 @@ const PROGRESS_COLOR = "#a3a3a3"; // neutral-400
 const CURSOR_COLOR = "#fafafa"; // neutral-50 -- bright so the playhead reads over any region fill
 const REGION_COLOR = "rgba(163, 163, 163, 0.25)"; // neutral-400 @ 25%
 
+// A flat, silent waveform. Without `peaks`, wavesurfer fetch()es the entire
+// media file and decodes it with Web Audio just to draw the waveform. For
+// multi-GB video that means several full in-memory copies of the file (and a
+// full read on the Tauri main thread), which freezes and then crashes the app
+// (see spec/3-video-opening-lag.md). Supplying peaks skips that fetch
+// entirely; everything we actually use wavesurfer for -- seeking, the
+// playhead, marker regions -- only needs the duration.
+const FLAT_PEAKS = [[0]];
+
 export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>(function VideoScrubber(
-  { src, fps, markers, onMarkersChange },
+  { src, fps, duration: probedDuration, markers, onMarkersChange },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -38,7 +49,9 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
   const isApplyingExternalMarkers = useRef(false);
 
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  // Seeded from the scan-time probe so the total shows immediately; replaced by
+  // the native element's own duration once that's known.
+  const [duration, setDuration] = useState(probedDuration ?? 0);
   const [isPlaying, setIsPlaying] = useState(false);
   // WebKitGTK (Linux) has historically lagged Chromium/Safari on newer video
   // APIs -- feature-detect rather than assume parity across platforms.
@@ -64,6 +77,7 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
     function checkDuration() {
       if (video && Number.isFinite(video.duration) && video.duration > 0) {
         setHasSaneDuration(true);
+        setDuration(video.duration);
       }
     }
     checkDuration();
@@ -91,6 +105,10 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
     const wavesurfer = WaveSurfer.create({
       container: waveformRef.current,
       media: videoRef.current,
+      peaks: FLAT_PEAKS,
+      // With peaks present wavesurfer never fetches. A known duration also lets
+      // it finish loading immediately instead of waiting for loadedmetadata.
+      duration: probedDuration && probedDuration > 0 ? probedDuration : undefined,
       height: 30,
       waveColor: WAVE_COLOR,
       progressColor: PROGRESS_COLOR,
@@ -109,7 +127,11 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
     regionsRef.current = regions;
 
     wavesurfer.on("timeupdate", (t) => setCurrentTime(t));
-    wavesurfer.on("ready", (d) => setDuration(d));
+    wavesurfer.on("ready", (d) => {
+      if (Number.isFinite(d) && d > 0) setDuration(d);
+    });
+    // Load errors were previously swallowed, leaving a blank bar and a 0 total.
+    wavesurfer.on("error", (err) => console.error("wavesurfer error:", err));
     wavesurfer.on("play", () => setIsPlaying(true));
     wavesurfer.on("pause", () => setIsPlaying(false));
 
