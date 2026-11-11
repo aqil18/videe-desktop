@@ -1,14 +1,16 @@
 import { colorForLabel, withAlpha } from "../lib/color";
-import { formatDuration } from "../lib/format";
+import { formatFrameTimecode } from "../lib/format";
 import type { Marker } from "../types";
 
 interface MarkerListProps {
   markers: Marker[];
+  fps: number;
   onChange: (markers: Marker[]) => void;
   onSeek: (seconds: number) => void;
 }
 
-export function MarkerList({ markers, onChange, onSeek }: MarkerListProps) {
+/** Lists a clip's timestamps in time order (not creation order). */
+export function MarkerList({ markers, fps, onChange, onSeek }: MarkerListProps) {
   function updateLabel(id: string, label: string) {
     onChange(markers.map((m) => (m.id === id ? { ...m, label } : m)));
   }
@@ -18,12 +20,14 @@ export function MarkerList({ markers, onChange, onSeek }: MarkerListProps) {
   }
 
   if (markers.length === 0) {
-    return <p className="text-xs text-neutral-600">No markers yet. Press I to mark in, O to mark out.</p>;
+    return <p className="text-xs text-neutral-600">No timestamps yet. Press T to add one.</p>;
   }
+
+  const sorted = [...markers].sort((a, b) => a.inSeconds - b.inSeconds);
 
   return (
     <ul className="flex flex-col gap-1.5">
-      {markers.map((marker) => {
+      {sorted.map((marker) => {
         const color = colorForLabel(marker.label);
         return (
           <li
@@ -34,10 +38,10 @@ export function MarkerList({ markers, onChange, onSeek }: MarkerListProps) {
             <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
             <button
               onClick={() => onSeek(marker.inSeconds)}
-              title="Jump to marker"
+              title="Jump to timestamp"
               className="shrink-0 text-xs tabular-nums text-neutral-500 transition hover:text-neutral-200"
             >
-              {formatDuration(marker.inSeconds)}–{formatDuration(marker.outSeconds)}
+              {formatFrameTimecode(marker.inSeconds, fps)}
             </button>
             <input
               value={marker.label}
@@ -46,7 +50,7 @@ export function MarkerList({ markers, onChange, onSeek }: MarkerListProps) {
             />
             <button
               onClick={() => removeMarker(marker.id)}
-              aria-label={`Delete marker ${marker.label}`}
+              aria-label={`Delete timestamp ${marker.label}`}
               className="shrink-0 text-neutral-500 transition hover:text-red-400"
             >
               ×

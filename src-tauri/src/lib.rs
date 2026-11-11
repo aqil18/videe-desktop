@@ -255,39 +255,34 @@ struct ExportClipsInput {
     format: String,
 }
 
-/// Builds one `ExportRow` per marker for the given clips, or one row covering the
-/// whole clip if it has no markers, so every selected clip is represented even if
-/// nobody's marked it up yet. Shared by the file-export command and the "send to
-/// DaVinci" bridge so the marker-gathering/fps-probing logic isn't duplicated.
+/// Builds one `ExportRow` per selected clip, covering the whole clip and carrying
+/// its timestamps (sorted by time). Shared by the file-export command and the "send
+/// to DaVinci" bridge so the timestamp-gathering logic isn't duplicated.
 fn build_export_rows(root: &Path, selected: &[cache::ClipRow]) -> Vec<export::ExportRow> {
-    let mut rows = Vec::new();
-    for clip in selected {
-        let sidecar_path = metadata::sidecar_path(root, &clip.id);
-        let markers = metadata::read_metadata(&sidecar_path).map(|m| m.markers).unwrap_or_default();
+    selected
+        .iter()
+        .map(|clip| {
+            let sidecar_path = metadata::sidecar_path(root, &clip.id);
+            let markers = metadata::read_metadata(&sidecar_path).map(|m| m.markers).unwrap_or_default();
+            let mut timestamps: Vec<export::ExportTimestamp> = markers
+                .into_iter()
+                .map(|m| export::ExportTimestamp {
+                    seconds: m.in_seconds,
+                    label: m.label,
+                })
+                .collect();
+            timestamps.sort_by(|a, b| a.seconds.total_cmp(&b.seconds));
 
-        if markers.is_empty() {
-            rows.push(export::ExportRow {
+            export::ExportRow {
                 filename: clip.filename.clone(),
                 tags: clip.tags.clone(),
-                marker_label: String::new(),
                 in_seconds: 0.0,
                 out_seconds: clip.duration.unwrap_or(0.0),
                 fps: clip.fps,
-            });
-        } else {
-            for marker in markers {
-                rows.push(export::ExportRow {
-                    filename: clip.filename.clone(),
-                    tags: clip.tags.clone(),
-                    marker_label: marker.label,
-                    in_seconds: marker.in_seconds,
-                    out_seconds: marker.out_seconds,
-                    fps: clip.fps,
-                });
+                timestamps,
             }
-        }
-    }
-    rows
+        })
+        .collect()
 }
 
 fn selected_clip_rows(state: &State<'_, AppState>, library_root: &str, clip_ids: &[String]) -> Result<Vec<cache::ClipRow>, String> {
@@ -352,19 +347,31 @@ struct SendClipsToResolveInput {
 /// Builds an EDL for the selection, same as `export_clips`, but instead of a save
 /// dialog it hands the file to the `Videe.lua` bridge running inside DaVinci
 /// Resolve via `ImportTimelineFromFile`, using the synced library folder as the
-/// clip-relinking source.
+/// clip-relinking source. Each clip's timestamps go along with it and are added
+/// as markers on the new timeline.
 #[tauri::command]
 async fn send_clips_to_resolve(state: State<'_, AppState>, input: SendClipsToResolveInput) -> Result<(), String> {
     let root = Path::new(&input.library_root);
     let selected = selected_clip_rows(&state, &input.library_root, &input.clip_ids)?;
     let rows = build_export_rows(root, &selected);
     let content = export::build_edl("Videe Export", &rows);
+    let markers: Vec<resolve_bridge::EventMarker> = rows
+        .iter()
+        .enumerate()
+        .flat_map(|(event_index, row)| {
+            row.timestamps.iter().map(move |ts| resolve_bridge::EventMarker {
+                event_index,
+                offset_seconds: ts.seconds - row.in_seconds,
+                label: ts.label.clone(),
+            })
+        })
+        .collect();
 
     let temp_path = std::env::temp_dir().join(format!("videe-resolve-{}.edl", uuid::Uuid::new_v4()));
     std::fs::write(&temp_path, content).map_err(|e| e.to_string())?;
 
     let timeline_name = format!("Videe Export {}", metadata::now_iso8601());
-    let result = resolve_bridge::import_edl(&temp_path, root, &timeline_name)
+    let result = resolve_bridge::import_edl(&temp_path, root, &timeline_name, &markers)
         .await
         .map_err(|e| e.to_string());
 

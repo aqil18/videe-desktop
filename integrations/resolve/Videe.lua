@@ -1386,7 +1386,7 @@ local function sleep_ms(ms)
 end
 
 -- Minimal JSON codec limited to our fixed, flat, all-string message shapes --
--- {"func":"...","path":"...","sourceClipsPath":"...","timelineName":"..."}
+-- {"func":"...","path":"...","sourceClipsPath":"...","timelineName":"...","markers":"..."}
 -- requests and {"ok":bool,"error":"..."} responses. Not a general JSON library
 -- on purpose: our schema never nests or uses numbers/arrays, so a hand-rolled
 -- codec this small is easier to reason about (and license) than vendoring one.
@@ -1463,7 +1463,60 @@ end
 -- `resolve` is a global provided automatically when this script is launched
 -- from Resolve's Workspace > Scripts menu -- no bmd.scriptapp() call needed.
 
-local function import_edl(path, source_clips_path, timeline_name)
+-- Markers arrive as one string, a line per marker: "<event>\t<offsetSeconds>\t<name>",
+-- where <event> is the 1-based EDL event (clip) the marker belongs to and the
+-- offset is seconds from that clip's start. See resolve_bridge.rs::encode_markers.
+local function parse_markers(str)
+    local markers = {}
+    if not str or str == "" then
+        return markers
+    end
+    for line in str:gmatch("[^\n]+") do
+        local event, offset, name = line:match("^(%d+)\t([^\t]+)\t(.*)$")
+        if event and tonumber(offset) then
+            table.insert(markers, { event = tonumber(event), offset = tonumber(offset), name = name })
+        end
+    end
+    return markers
+end
+
+-- Adds markers to the timeline, each placed relative to where Resolve actually
+-- put its clip rather than at a precomputed absolute position, so this doesn't
+-- depend on the timeline's start timecode or on its frame rate matching the
+-- clip's. Returns how many markers couldn't be added.
+local function add_markers(timeline, markers)
+    if #markers == 0 then
+        return 0
+    end
+
+    -- e.g. "25", "23.976", or "29.97 DF" -- keep just the number.
+    local fps = tonumber(tostring(timeline:GetSetting("timelineFrameRate") or ""):match("[%d%.]+"))
+    local timeline_start = timeline:GetStartFrame()
+
+    -- One EDL event per clip, all on V1, so V1's items in timeline order line up
+    -- with the event numbers.
+    local items = {}
+    for _, item in pairs(timeline:GetItemListInTrack("video", 1) or {}) do
+        table.insert(items, item)
+    end
+    table.sort(items, function(a, b) return a:GetStart() < b:GetStart() end)
+
+    local failed = 0
+    for _, marker in ipairs(markers) do
+        local item = items[marker.event]
+        local added = false
+        if item and fps then
+            local frame = item:GetStart() - timeline_start + math.floor(marker.offset * fps + 0.5)
+            added = timeline:AddMarker(frame, "Blue", marker.name, "", 1)
+        end
+        if not added then
+            failed = failed + 1
+        end
+    end
+    return failed
+end
+
+local function import_edl(path, source_clips_path, timeline_name, markers)
     if not resolve then
         return false, "This script must be run from inside DaVinci Resolve (Workspace > Scripts > Utility > Videe)"
     end
@@ -1488,6 +1541,16 @@ local function import_edl(path, source_clips_path, timeline_name)
     if not result then
         return false, "Resolve could not import the EDL (check that the source clips are under " .. tostring(source_clips_path) .. ")"
     end
+
+    -- `result` is the newly created Timeline.
+    local wanted = parse_markers(markers)
+    local marker_ok, failed = pcall(add_markers, result, wanted)
+    if not marker_ok then
+        return false, "Timeline imported, but adding markers failed: " .. tostring(failed)
+    end
+    if failed > 0 then
+        return false, "Timeline imported, but " .. failed .. " of " .. #wanted .. " timestamps couldn't be added as markers"
+    end
     return true
 end
 
@@ -1500,7 +1563,7 @@ local function handle_request(body)
     if req.func == "Ping" then
         return json.encode({ ok = true })
     elseif req.func == "ImportEDL" then
-        local ok, err = import_edl(req.path, req.sourceClipsPath, req.timelineName)
+        local ok, err = import_edl(req.path, req.sourceClipsPath, req.timelineName, req.markers)
         return json.encode({ ok = ok, error = err })
     else
         return json.encode({ ok = false, error = "unknown func: " .. tostring(req.func) })

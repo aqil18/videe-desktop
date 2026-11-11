@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import WaveSurfer from "wavesurfer.js";
 import RegionsPlugin, { type Region } from "wavesurfer.js/plugins/regions";
-import { colorForLabel, withAlpha } from "../lib/color";
+import { colorForLabel } from "../lib/color";
 import { formatFrameTimecode, frameNumber } from "../lib/format";
 import type { Marker } from "../types";
 import "./VideoScrubber.css";
@@ -24,7 +24,6 @@ interface VideoScrubberProps {
 const WAVE_COLOR = "#525252"; // neutral-600
 const PROGRESS_COLOR = "#a3a3a3"; // neutral-400
 const CURSOR_COLOR = "#fafafa"; // neutral-50 -- bright so the playhead reads over any region fill
-const REGION_COLOR = "rgba(163, 163, 163, 0.25)"; // neutral-400 @ 25%
 
 // A flat, silent waveform. Without `peaks`, wavesurfer fetch()es the entire
 // media file and decodes it with Web Audio just to draw the waveform. For
@@ -32,7 +31,7 @@ const REGION_COLOR = "rgba(163, 163, 163, 0.25)"; // neutral-400 @ 25%
 // full read on the Tauri main thread), which freezes and then crashes the app
 // (see spec/3-video-opening-lag.md). Supplying peaks skips that fetch
 // entirely; everything we actually use wavesurfer for -- seeking, the
-// playhead, marker regions -- only needs the duration.
+// playhead, timestamp regions -- only needs the duration.
 const FLAT_PEAKS = [[0]];
 
 export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>(function VideoScrubber(
@@ -44,9 +43,6 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const markersRef = useRef(markers);
-  // Guards the markers->regions sync effect from having its own addRegion()
-  // calls mistaken for user-created regions by the region-created listener.
-  const isApplyingExternalMarkers = useRef(false);
 
   const [currentTime, setCurrentTime] = useState(0);
   // Seeded from the scan-time probe so the total shows immediately; replaced by
@@ -121,7 +117,6 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
       dragToSeek: true,
     });
     const regions = wavesurfer.registerPlugin(RegionsPlugin.create());
-    const disableDragSelection = regions.enableDragSelection({ color: REGION_COLOR });
 
     wavesurferRef.current = wavesurfer;
     regionsRef.current = regions;
@@ -135,27 +130,14 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
     wavesurfer.on("play", () => setIsPlaying(true));
     wavesurfer.on("pause", () => setIsPlaying(false));
 
-    // Fires once per completed drag/resize gesture (or once for a
-    // drag-to-create) -- NOT the continuous "region-update" -- so this is the
-    // only place regions ever reach back into `markers` state, and it always
-    // carries the settled final start/end.
-    regions.on("region-created", (region: Region) => {
-      if (isApplyingExternalMarkers.current) return;
-      const marker: Marker = {
-        id: region.id,
-        label: `Marker ${markersRef.current.length + 1}`,
-        inSeconds: region.start,
-        outSeconds: region.end,
-        notes: "",
-      };
-      onMarkersChange([...markersRef.current, marker]);
-    });
-
+    // Fires once per completed drag of a timestamp -- NOT the continuous
+    // "region-update" -- so this is the only place regions ever reach back into
+    // `markers` state, and it always carries the settled final position.
+    // Timestamps are points, so in and out always move together.
     regions.on("region-updated", (region: Region) => {
-      if (isApplyingExternalMarkers.current) return;
       onMarkersChange(
         markersRef.current.map((m) =>
-          m.id === region.id ? { ...m, inSeconds: region.start, outSeconds: region.end } : m,
+          m.id === region.id ? { ...m, inSeconds: region.start, outSeconds: region.start } : m,
         ),
       );
     });
@@ -166,7 +148,6 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
     });
 
     return () => {
-      disableDragSelection();
       wavesurfer.destroy();
       wavesurferRef.current = null;
       regionsRef.current = null;
@@ -175,63 +156,39 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
   }, []);
 
   // Sync `markers` (the source of truth, owned by ClipDetailPanel) -> wavesurfer
-  // Regions whenever markers change from outside a region gesture: the I/O
-  // keyboard handler below, MarkerList's label edits/deletes, or the initial
-  // async marker fetch resolving. setOptions() only emits "render" internally,
-  // never "region-update"/"region-updated", so this can't loop through the
-  // region-updated listener above -- the guard exists solely to stop
-  // addRegion() calls here (for markers not yet mirrored as regions) from
-  // being mistaken for user-created regions by the region-created listener.
+  // Regions whenever they change: the T key handler below, MarkerList's label
+  // edits/deletes, or the initial async fetch resolving. setOptions() only emits
+  // "render" internally, never "region-update"/"region-updated", so this can't
+  // loop through the region-updated listener above.
+  //
+  // Every timestamp renders as a point region (start === end) at inSeconds.
+  // That includes in/out ranges logged by older builds, which show up as a
+  // timestamp at their in-point.
   useEffect(() => {
     const regions = regionsRef.current;
     if (!regions || !hasSaneDuration) return;
 
-    isApplyingExternalMarkers.current = true;
-    try {
-      const existing = new Map(regions.getRegions().map((r) => [r.id, r]));
-      for (const marker of markers) {
-        const region = existing.get(marker.id);
-        const color = withAlpha(colorForLabel(marker.label), 0.28);
-        if (!region) {
-          regions.addRegion({
-            id: marker.id,
-            start: marker.inSeconds,
-            end: marker.outSeconds,
-            color,
-          });
-        } else {
-          const wasPoint = region.start === region.end;
-          const willBePoint = marker.inSeconds === marker.outSeconds;
-          if (wasPoint !== willBePoint) {
-            // wavesurfer's Region only builds its fill color and resize handles
-            // once, at construction, based on start===end at that moment --
-            // setOptions() repositions but never upgrades a point marker into a
-            // filled region (or vice versa). Recreate so the DOM matches reality.
-            region.remove();
-            regions.addRegion({
-              id: marker.id,
-              start: marker.inSeconds,
-              end: marker.outSeconds,
-              color,
-            });
-          } else {
-            if (region.start !== marker.inSeconds || region.end !== marker.outSeconds) {
-              region.setOptions({ start: marker.inSeconds, end: marker.outSeconds });
-            }
-            if (region.color !== color) {
-              region.setOptions({ color });
-            }
-          }
-          existing.delete(marker.id);
+    const existing = new Map(regions.getRegions().map((r) => [r.id, r]));
+    for (const marker of markers) {
+      const region = existing.get(marker.id);
+      const color = colorForLabel(marker.label);
+      const t = marker.inSeconds;
+      if (!region) {
+        regions.addRegion({ id: marker.id, start: t, end: t, color, resize: false });
+      } else {
+        if (region.start !== t || region.end !== t) {
+          region.setOptions({ start: t, end: t });
         }
+        if (region.color !== color) {
+          region.setOptions({ color });
+        }
+        existing.delete(marker.id);
       }
-      // Whatever's left had its marker removed elsewhere (e.g. MarkerList's
-      // delete button) -- drop the now-orphaned region to match.
-      for (const stale of existing.values()) {
-        stale.remove();
-      }
-    } finally {
-      isApplyingExternalMarkers.current = false;
+    }
+    // Whatever's left had its timestamp removed elsewhere (e.g. MarkerList's
+    // delete button) -- drop the now-orphaned region to match.
+    for (const stale of existing.values()) {
+      stale.remove();
     }
   }, [markers, hasSaneDuration]);
 
@@ -261,7 +218,7 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
     }
   }
 
-  // I marks in, O marks out, ArrowLeft/ArrowRight step one frame -- all on
+  // T drops a timestamp, ArrowLeft/ArrowRight step one frame -- all on
   // whichever clip is currently loaded. No native <video controls>, so the
   // waveform plus this listener are the only scrub/seek surface; that
   // sidesteps Chromium/WebKit intercepting arrow keys for native ~5-10s
@@ -291,22 +248,18 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
         return;
       }
 
-      const key = e.key.toLowerCase();
-      if (key === "i") {
+      if (e.key.toLowerCase() === "t") {
         e.preventDefault();
+        if (e.repeat) return; // holding T shouldn't spray timestamps
         const t = wavesurfer.getCurrentTime();
-        onMarkersChange([
-          ...markersRef.current,
-          { id: crypto.randomUUID(), label: `Marker ${markersRef.current.length + 1}`, inSeconds: t, outSeconds: t, notes: "" },
-        ]);
-      } else if (key === "o") {
-        e.preventDefault();
-        const t = wavesurfer.getCurrentTime();
-        const prev = markersRef.current;
-        if (prev.length === 0) return;
-        onMarkersChange(
-          prev.map((m, i) => (i === prev.length - 1 ? { ...m, outSeconds: Math.max(t, m.inSeconds) } : m)),
-        );
+        const timestamp: Marker = {
+          id: crypto.randomUUID(),
+          label: `Timestamp ${markersRef.current.length + 1}`,
+          inSeconds: t,
+          outSeconds: t,
+          notes: "",
+        };
+        onMarkersChange([...markersRef.current, timestamp]);
       }
     }
     window.addEventListener("keydown", onKeyDown);
@@ -338,7 +291,7 @@ export const VideoScrubber = forwardRef<VideoScrubberHandle, VideoScrubberProps>
         )}
       </div>
       <p className="text-xs text-neutral-600">
-        Press I to mark in, O to mark out. ← → step one frame. Drag on the waveform to create a marker.
+        Press T to add a timestamp. ← → step one frame. Drag a timestamp on the bar to move it.
       </p>
     </div>
   );

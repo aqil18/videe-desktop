@@ -70,6 +70,36 @@ struct ImportEdlRequest<'a> {
     source_clips_path: &'a str,
     #[serde(rename = "timelineName")]
     timeline_name: &'a str,
+    /// See `encode_markers`.
+    markers: String,
+}
+
+/// A timestamp to add as a marker on the imported timeline, positioned relative
+/// to the EDL event (i.e. the clip) it belongs to rather than as an absolute
+/// timeline position. The Lua side resolves it against where Resolve actually
+/// placed that clip, so it doesn't depend on the timeline's start timecode or
+/// on the timeline frame rate matching the clip's.
+pub struct EventMarker {
+    /// 0-based index of the EDL event, in file order.
+    pub event_index: usize,
+    /// Seconds from the start of the event's source range.
+    pub offset_seconds: f64,
+    pub label: String,
+}
+
+/// The Lua bridge's JSON decoder only handles flat string fields, so markers
+/// travel as one string: a line per marker of `<1-based event>\t<offset
+/// seconds>\t<label>`. Tabs, newlines and other control characters in labels
+/// would break that framing, so they're replaced with spaces.
+fn encode_markers(markers: &[EventMarker]) -> String {
+    markers
+        .iter()
+        .map(|m| {
+            let label: String = m.label.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+            format!("{}\t{:.6}\t{}", m.event_index + 1, m.offset_seconds.max(0.0), label)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[derive(Deserialize)]
@@ -96,12 +126,18 @@ pub async fn ping() -> bool {
     resp.json::<BridgeResponse>().await.map(|r| r.ok).unwrap_or(false)
 }
 
-pub async fn import_edl(edl_path: &Path, source_clips_path: &Path, timeline_name: &str) -> Result<(), BridgeError> {
+pub async fn import_edl(
+    edl_path: &Path,
+    source_clips_path: &Path,
+    timeline_name: &str,
+    markers: &[EventMarker],
+) -> Result<(), BridgeError> {
     let req = ImportEdlRequest {
         func: "ImportEDL",
         path: &edl_path.to_string_lossy(),
         source_clips_path: &source_clips_path.to_string_lossy(),
         timeline_name,
+        markers: encode_markers(markers),
     };
     let resp = client().post(endpoint()).json(&req).send().await?;
     let parsed: BridgeResponse = resp
@@ -265,6 +301,16 @@ mod tests {
         server.await.unwrap();
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("No project is open"));
+    }
+
+    #[test]
+    fn markers_encode_as_one_line_each_with_1_based_events_and_safe_labels() {
+        let encoded = encode_markers(&[
+            EventMarker { event_index: 0, offset_seconds: 1.5, label: "Best take".to_string() },
+            EventMarker { event_index: 2, offset_seconds: 12.0, label: "tab\there\nnewline".to_string() },
+        ]);
+        assert_eq!(encoded, "1\t1.500000\tBest take\n3\t12.000000\ttab here newline");
+        assert_eq!(encode_markers(&[]), "");
     }
 
     #[test]

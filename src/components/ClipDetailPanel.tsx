@@ -99,8 +99,13 @@ export function ClipDetailPanel({ clip, libraryRoot, onSaved, projectTags }: Cli
       />
 
       <div>
-        <label className="mb-1.5 block text-xs font-medium text-neutral-400">Markers</label>
-        <MarkerList markers={markers} onChange={setMarkers} onSeek={(t) => scrubberRef.current?.seek(t)} />
+        <label className="mb-1.5 block text-xs font-medium text-neutral-400">Timestamps</label>
+        <MarkerList
+          markers={markers}
+          fps={clip.fps}
+          onChange={setMarkers}
+          onSeek={(t) => scrubberRef.current?.seek(t)}
+        />
       </div>
 
       <div>
