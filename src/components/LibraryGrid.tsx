@@ -18,7 +18,7 @@ export function LibraryGrid({ clips, selectedIds, onSelect, onToggleSelect }: Li
   }
 
   return (
-    <div className="grid flex-1 grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 overflow-y-auto p-4">
+    <div className="grid min-h-0 flex-1 auto-rows-max content-start grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 overflow-y-auto p-4">
       {clips.map((clip) => (
         <ClipCard
           key={clip.id}
