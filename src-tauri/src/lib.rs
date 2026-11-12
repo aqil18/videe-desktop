@@ -257,7 +257,8 @@ struct ExportClipsInput {
 
 /// Builds one `ExportRow` per selected clip, covering the whole clip and carrying
 /// its timestamps (sorted by time). Shared by the file-export command and the "send
-/// to DaVinci" bridge so the timestamp-gathering logic isn't duplicated.
+/// to DaVinci" bridge so the timestamp-gathering logic isn't duplicated. Start
+/// timecode is left at zero here; only EDL export needs it (see `export_clips`).
 fn build_export_rows(root: &Path, selected: &[cache::ClipRow]) -> Vec<export::ExportRow> {
     selected
         .iter()
@@ -268,7 +269,9 @@ fn build_export_rows(root: &Path, selected: &[cache::ClipRow]) -> Vec<export::Ex
                 .into_iter()
                 .map(|m| export::ExportTimestamp {
                     seconds: m.in_seconds,
+                    duration_seconds: (m.out_seconds - m.in_seconds).max(0.0),
                     label: m.label,
+                    notes: m.notes,
                 })
                 .collect();
             timestamps.sort_by(|a, b| a.seconds.total_cmp(&b.seconds));
@@ -279,10 +282,41 @@ fn build_export_rows(root: &Path, selected: &[cache::ClipRow]) -> Vec<export::Ex
                 in_seconds: 0.0,
                 out_seconds: clip.duration.unwrap_or(0.0),
                 fps: clip.fps,
+                start_timecode: export::StartTimecode::default(),
                 timestamps,
             }
         })
         .collect()
+}
+
+/// Fills in what an EDL needs beyond the cache: each clip's embedded start
+/// timecode (without it, conform looks for the wrong frames and shows Media
+/// Offline), and its duration if the scan couldn't read one. Errors instead of
+/// writing a zero-length event for a clip whose length is still unknown.
+async fn prepare_edl_rows(app: &AppHandle, rows: &mut [export::ExportRow], selected: &[cache::ClipRow]) -> Result<(), String> {
+    for (row, clip) in rows.iter_mut().zip(selected) {
+        let path = Path::new(&clip.path);
+        if row.out_seconds <= 0.0 {
+            if let Ok(duration) = ffmpeg::probe_duration_seconds(app, path).await {
+                row.out_seconds = duration;
+            }
+        }
+        if let Some(raw) = ffmpeg::probe_start_timecode(app, path).await {
+            match export::parse_timecode(&raw, row.fps) {
+                Some(tc) => row.start_timecode = tc,
+                None => eprintln!("ignoring unparseable timecode {raw:?} on {}", clip.path),
+            }
+        }
+    }
+
+    let unknown: Vec<&str> = rows.iter().filter(|r| r.out_seconds <= 0.0).map(|r| r.filename.as_str()).collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "Couldn't read the length of {}, so it can't go in an EDL. Try re-scanning the library.",
+            unknown.join(", ")
+        ));
+    }
+    Ok(())
 }
 
 fn selected_clip_rows(state: &State<'_, AppState>, library_root: &str, clip_ids: &[String]) -> Result<Vec<cache::ClipRow>, String> {
@@ -294,17 +328,26 @@ fn selected_clip_rows(state: &State<'_, AppState>, library_root: &str, clip_ids:
 }
 
 /// Exports the selected clips as CSV or EDL. Prompts for a save location and
-/// returns the chosen path, or `None` if the user cancelled the dialog.
+/// returns the chosen path, or `None` if the user cancelled the dialog. An EDL
+/// export with timestamps also writes `<name>.markers.edl` next to it, in
+/// Resolve's timeline-marker format.
 #[tauri::command]
 async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportClipsInput) -> Result<Option<String>, String> {
     let root = Path::new(&input.library_root);
     let selected = selected_clip_rows(&state, &input.library_root, &input.clip_ids)?;
-    let rows = build_export_rows(root, &selected);
+    let mut rows = build_export_rows(root, &selected);
 
-    let (content, default_name, filter_label, extension) = if input.format == "edl" {
-        (export::build_edl("Videe Export", &rows), "videe-export.edl", "EDL", "edl")
+    let (content, marker_content, default_name, filter_label, extension) = if input.format == "edl" {
+        prepare_edl_rows(&app, &mut rows, &selected).await?;
+        (
+            export::build_edl("Videe Export", &rows),
+            export::build_marker_edl("Videe Export Markers", &rows),
+            "videe-export.edl",
+            "EDL",
+            "edl",
+        )
     } else {
-        (export::build_csv(&rows), "videe-export.csv", "CSV", "csv")
+        (export::build_csv(&rows), None, "videe-export.csv", "CSV", "csv")
     };
 
     let picked = app
@@ -319,6 +362,9 @@ async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportC
     };
     let save_path = picked.as_path().ok_or("save dialog returned an invalid path")?;
     std::fs::write(save_path, content).map_err(|e| e.to_string())?;
+    if let Some(markers) = marker_content {
+        std::fs::write(save_path.with_extension("markers.edl"), markers).map_err(|e| e.to_string())?;
+    }
     Ok(Some(save_path.to_string_lossy().to_string()))
 }
 
@@ -344,39 +390,33 @@ struct SendClipsToResolveInput {
     clip_ids: Vec<String>,
 }
 
-/// Builds an EDL for the selection, same as `export_clips`, but instead of a save
-/// dialog it hands the file to the `Videe.lua` bridge running inside DaVinci
-/// Resolve via `ImportTimelineFromFile`, using the synced library folder as the
-/// clip-relinking source. Each clip's timestamps go along with it and are added
-/// as markers on the new timeline.
+/// Sends the selection to the `Videe.lua` bridge running inside DaVinci Resolve,
+/// which imports the files by absolute path and builds a timeline from them,
+/// then adds each clip's timestamps as markers. No EDL is involved: EDL conform
+/// has to re-find media by timecode, frame rate and reel name, and any mismatch
+/// shows up as Media Offline. Importing the exact files can't go offline.
 #[tauri::command]
 async fn send_clips_to_resolve(state: State<'_, AppState>, input: SendClipsToResolveInput) -> Result<(), String> {
     let root = Path::new(&input.library_root);
     let selected = selected_clip_rows(&state, &input.library_root, &input.clip_ids)?;
     let rows = build_export_rows(root, &selected);
-    let content = export::build_edl("Videe Export", &rows);
-    let markers: Vec<resolve_bridge::EventMarker> = rows
+    let clip_paths: Vec<PathBuf> = selected.iter().map(|clip| PathBuf::from(&clip.path)).collect();
+    let markers: Vec<resolve_bridge::ClipMarker> = rows
         .iter()
         .enumerate()
-        .flat_map(|(event_index, row)| {
-            row.timestamps.iter().map(move |ts| resolve_bridge::EventMarker {
-                event_index,
+        .flat_map(|(clip_index, row)| {
+            row.timestamps.iter().map(move |ts| resolve_bridge::ClipMarker {
+                clip_index,
                 offset_seconds: ts.seconds - row.in_seconds,
                 label: ts.label.clone(),
             })
         })
         .collect();
 
-    let temp_path = std::env::temp_dir().join(format!("videe-resolve-{}.edl", uuid::Uuid::new_v4()));
-    std::fs::write(&temp_path, content).map_err(|e| e.to_string())?;
-
     let timeline_name = format!("Videe Export {}", metadata::now_iso8601());
-    let result = resolve_bridge::import_edl(&temp_path, root, &timeline_name, &markers)
+    resolve_bridge::create_timeline(&clip_paths, &timeline_name, &markers)
         .await
-        .map_err(|e| e.to_string());
-
-    std::fs::remove_file(&temp_path).ok();
-    result
+        .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

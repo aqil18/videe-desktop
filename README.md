@@ -33,14 +33,26 @@ EDL** buttons. A native save dialog asks where to put the file.
   `HH:MM:SS.mmm`, label). A clip with no timestamps exports as a single row
   with those columns empty, so every selected clip shows up even if untagged.
 - **EDL**: a CMX3600 edit decision list with one event per clip, laid
-  back-to-back on the record timeline, so importing it into Premiere or
-  Resolve gives you an assembled sequence, not just a list. Timestamps are
-  written as `* MARKER:` comments on their clip's event. Timecodes are
-  frame-accurate (`HH:MM:SS:FF`), using each clip's frame rate probed via
-  ffprobe at export time (falls back to 25fps if a stream's rate can't be read).
-- **Send to DaVinci**: imports the same EDL as a new timeline through the
-  Videe bridge script, then adds each timestamp as a blue timeline marker
-  (named after the timestamp's label) at its position in the clip.
+  back-to-back on a record timeline starting at `01:00:00:00`, so importing
+  it into Premiere or Resolve gives you an assembled sequence, not just a
+  list. Source timecodes start at each clip's embedded timecode (read with
+  ffprobe at export; iPhone and camera files record time-of-day timecode),
+  which is what the NLE's conform matches against. Drop-frame timecode is
+  written with `;`. The record side uses one frame rate, the most common one
+  in the selection: set your NLE project to that rate before importing.
+  If any clip has timestamps, a second file, `<name>.markers.edl`, is
+  written next to it in Resolve's timeline-marker format. In Resolve, import
+  the EDL as a timeline, then use **Timeline > Import > Timeline Markers from
+  EDL** on that file.
+- **Send to DaVinci**: imports the selected files directly into the open
+  Resolve project's Media Pool through the Videe bridge script (reusing any
+  already there), builds a new timeline from them, and adds each timestamp as
+  a blue marker named after its label. No EDL is involved, so there's no
+  conform step to go wrong. After updating Videe, click **Install Script**
+  again and re-run **Workspace > Scripts > Utility > Videe** in Resolve; the
+  new copy asks the running one to exit and takes over. (Restarting Resolve
+  alone doesn't do it: the script runs in a `fuscript` process that outlives
+  Resolve.)
 
 This intentionally doesn't export FCPXML. FCPXML's resource/timecode schema
 is easy to get subtly wrong, and a file that silently fails to import is
