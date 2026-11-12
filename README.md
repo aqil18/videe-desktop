@@ -6,7 +6,7 @@ you point it at a folder that's already being synced by Google Drive, Dropbox,
 or any similar client, and it:
 
 - scans that folder for video files and shows them as a searchable, taggable grid
-- lets you tag clips, add notes, and mark in/out points on a timeline
+- lets you tag clips, add notes, and drop timestamps on a timeline (press T)
 - writes all of that metadata as small JSON files *inside the same folder*
 
 Because the metadata lives next to your footage in the synced folder, it
@@ -29,14 +29,30 @@ Select one or more clips in the library grid (checkbox in the top-left corner
 of each card) and an export bar appears with **Export CSV** and **Export
 EDL** buttons. A native save dialog asks where to put the file.
 
-- **CSV**: one row per marker (filename, tags, marker label, in/out as
-  `HH:MM:SS.mmm`). A clip with no markers exports as a single row covering
-  its full duration, so every selected clip shows up even if untagged.
-- **EDL**: a CMX3600 edit decision list with events laid back-to-back on the
-  record timeline, so importing it into Premiere or Resolve gives you an
-  assembled sequence of the marked ranges, not just a list. Timecodes are
-  frame-accurate (`HH:MM:SS:FF`), using each clip's frame rate probed via
-  ffprobe at export time (falls back to 25fps if a stream's rate can't be read).
+- **CSV**: one row per timestamp (filename, tags, timestamp as
+  `HH:MM:SS.mmm`, label). A clip with no timestamps exports as a single row
+  with those columns empty, so every selected clip shows up even if untagged.
+- **EDL**: a CMX3600 edit decision list with one event per clip, laid
+  back-to-back on a record timeline starting at `01:00:00:00`, so importing
+  it into Premiere or Resolve gives you an assembled sequence, not just a
+  list. Source timecodes start at each clip's embedded timecode (read with
+  ffprobe at export; iPhone and camera files record time-of-day timecode),
+  which is what the NLE's conform matches against. Drop-frame timecode is
+  written with `;`. The record side uses one frame rate, the most common one
+  in the selection: set your NLE project to that rate before importing.
+  If any clip has timestamps, a second file, `<name>.markers.edl`, is
+  written next to it in Resolve's timeline-marker format. In Resolve, import
+  the EDL as a timeline, then use **Timeline > Import > Timeline Markers from
+  EDL** on that file.
+- **Send to DaVinci**: imports the selected files directly into the open
+  Resolve project's Media Pool through the Videe bridge script (reusing any
+  already there), builds a new timeline from them, and adds each timestamp as
+  a blue marker named after its label. No EDL is involved, so there's no
+  conform step to go wrong. After updating Videe, click **Install Script**
+  again and re-run **Workspace > Scripts > Utility > Videe** in Resolve; the
+  new copy asks the running one to exit and takes over. (Restarting Resolve
+  alone doesn't do it: the script runs in a `fuscript` process that outlives
+  Resolve.)
 
 This intentionally doesn't export FCPXML. FCPXML's resource/timecode schema
 is easy to get subtly wrong, and a file that silently fails to import is
@@ -54,7 +70,7 @@ the library folder:
   "filename": "original file name at time of tagging",
   "tags": ["string", "string"],
   "markers": [
-    { "id": "uuid", "label": "string", "inSeconds": 12.5, "outSeconds": 18.2, "notes": "string" }
+    { "id": "uuid", "label": "string", "inSeconds": 12.5, "outSeconds": 12.5, "notes": "string" }
   ],
   "notes": "freeform string",
   "author": "local OS username, best-effort",
@@ -62,6 +78,11 @@ the library folder:
   "contentHash": "sha256 of file size + first 4MB, optional"
 }
 ```
+
+Each entry in `markers` is a timestamp at `inSeconds`. `outSeconds` is always
+written equal to it. The field is kept so sidecars stay readable by older
+builds, which logged in/out ranges. Ranges written by those builds load as a
+timestamp at their in-point.
 
 **Filename-vs-hash identity decision:** a clip is matched to its sidecar JSON
 primarily by filename. Each sidecar also stores a `contentHash` — a SHA-256 of

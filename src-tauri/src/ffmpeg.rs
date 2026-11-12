@@ -126,6 +126,35 @@ pub async fn probe_frame_rate(app: &AppHandle, video_path: &Path) -> f64 {
     parse_frame_rate(&String::from_utf8_lossy(&output.stdout)).unwrap_or(FALLBACK_FPS)
 }
 
+/// The clip's embedded start timecode tag, raw (e.g. "14:32:10;05"), or `None`
+/// if it has none. iPhone/camera .mov files keep it on a `tmcd` data stream,
+/// others on the container, so both are checked -- first one found wins.
+/// Parsing is left to export::parse_timecode, which knows the frame rate.
+pub async fn probe_start_timecode(app: &AppHandle, video_path: &Path) -> Option<String> {
+    let sidecar = app.shell().sidecar("ffprobe").ok()?;
+    let output = sidecar
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format_tags=timecode:stream_tags=timecode",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            &video_path.to_string_lossy(),
+        ])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(str::to_string)
+}
+
 /// ffprobe reports frame rate as a rational like "30000/1001" or "25/1".
 fn parse_frame_rate(raw: &str) -> Option<f64> {
     let raw = raw.trim();

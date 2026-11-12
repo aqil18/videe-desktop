@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// A timestamp on a clip. Its position is `in_seconds`. The app now only creates
+/// point timestamps (`out_seconds == in_seconds`), but the in/out shape is kept on
+/// disk so sidecars stay readable by older builds that logged in/out ranges, and
+/// so ranges logged by those builds still load (as a timestamp at their in-point).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Marker {
     pub id: String,

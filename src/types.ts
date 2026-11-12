@@ -13,6 +13,10 @@ export interface ClipSummary {
   fps: number;
 }
 
+// A timestamp on a clip, positioned at `inSeconds`. New ones are always points
+// (outSeconds === inSeconds); the in/out shape is kept so sidecars stay
+// compatible with older builds, and in/out ranges those builds logged load as a
+// timestamp at their in-point.
 export interface Marker {
   id: string;
   label: string;

@@ -4,15 +4,16 @@ Videe <-> DaVinci Resolve bridge.
 Install: click "Install Script" in Videe's DaVinci Resolve panel, which copies
 this file into Resolve's Utility scripts folder. Run it from inside Resolve via
 Workspace > Scripts > Utility > Videe. It then listens on 127.0.0.1 and waits
-for Videe to ask it to import an EDL -- Videe is the client, this script is
-the server, and it only ever does one thing: import a timeline into whichever
-project is currently open.
+for Videe to send it clips -- Videe is the client, this script is the server,
+and it only ever does one thing: import those files into whichever project is
+currently open, build a timeline from them, and mark their timestamps.
 
-This script runs until you close Resolve or run it again from the menu (which
-will fail to bind the port if the previous instance is still alive -- see the
-message printed to the console in that case). There's no reconnect/hot-reload
-machinery here on purpose: if this bridge's protocol ever changes in a way that
-needs it, add it then, driven by a real bug, not preemptively.
+This script keeps running in Resolve's `fuscript` process, which can outlive
+Resolve itself. Running it again from the menu asks the copy already running
+to exit and takes over the port, so an updated script takes effect without
+hunting down the old process (copies from before this handshake can't be
+asked, and the console then says how to stop them). Beyond that there's no
+reconnect/hot-reload machinery on purpose: add it when a real bug needs it.
 ]]
 
 local PORT = 51735
@@ -1386,7 +1387,7 @@ local function sleep_ms(ms)
 end
 
 -- Minimal JSON codec limited to our fixed, flat, all-string message shapes --
--- {"func":"...","path":"...","sourceClipsPath":"...","timelineName":"..."}
+-- {"func":"...","clips":"...","timelineName":"...","markers":"..."}
 -- requests and {"ok":bool,"error":"..."} responses. Not a general JSON library
 -- on purpose: our schema never nests or uses numbers/arrays, so a hand-rolled
 -- codec this small is easier to reason about (and license) than vendoring one.
@@ -1463,7 +1464,135 @@ end
 -- `resolve` is a global provided automatically when this script is launched
 -- from Resolve's Workspace > Scripts menu -- no bmd.scriptapp() call needed.
 
-local function import_edl(path, source_clips_path, timeline_name)
+-- Resolve hands back lists as tables that can also carry bookkeeping fields
+-- with plain number values (Fusion's `__flags`), so pairs() over one yields
+-- numbers alongside the API objects. Keeps just the objects (in no particular
+-- order -- sort afterwards where order matters).
+local function api_objects(list)
+    local objects = {}
+    for _, value in pairs(list or {}) do
+        local kind = type(value)
+        if kind == "table" or kind == "userdata" then
+            table.insert(objects, value)
+        end
+    end
+    return objects
+end
+
+-- Markers arrive as one string, a line per marker: "<clip>\t<offsetSeconds>\t<name>",
+-- where <clip> is the 1-based position in the clip list the marker belongs to
+-- and the offset is seconds from that clip's start. See resolve_bridge.rs::encode_markers.
+local function parse_markers(str)
+    local markers = {}
+    if not str or str == "" then
+        return markers
+    end
+    for line in str:gmatch("[^\n]+") do
+        local event, offset, name = line:match("^(%d+)\t([^\t]+)\t(.*)$")
+        if event and tonumber(offset) then
+            table.insert(markers, { event = tonumber(event), offset = tonumber(offset), name = name })
+        end
+    end
+    return markers
+end
+
+-- Adds markers to the timeline, each placed relative to where Resolve actually
+-- put its clip rather than at a precomputed absolute position, so this doesn't
+-- depend on the timeline's start timecode or on its frame rate matching the
+-- clip's. Returns how many markers couldn't be added.
+local function add_markers(timeline, markers)
+    if #markers == 0 then
+        return 0
+    end
+
+    -- e.g. "25", "23.976", or "29.97 DF" -- keep just the number.
+    local fps = tonumber(tostring(timeline:GetSetting("timelineFrameRate") or ""):match("[%d%.]+"))
+    local timeline_start = timeline:GetStartFrame()
+
+    -- The timeline is built from the clip list in order, all on V1, so V1's
+    -- items in timeline order line up with the clip numbers.
+    local items = api_objects(timeline:GetItemListInTrack("video", 1))
+    table.sort(items, function(a, b) return a:GetStart() < b:GetStart() end)
+
+    local failed = 0
+    for _, marker in ipairs(markers) do
+        local item = items[marker.event]
+        local added = false
+        if item and fps then
+            local frame = item:GetStart() - timeline_start + math.floor(marker.offset * fps + 0.5)
+            added = timeline:AddMarker(frame, "Blue", marker.name, "", 1)
+        end
+        if not added then
+            failed = failed + 1
+        end
+    end
+    return failed
+end
+
+local function basename(path)
+    return path:match("([^/\\]+)$") or path
+end
+
+-- Fills `found[path] = item` for every Media Pool clip whose file is one of
+-- `wanted`, searching every bin, so sending the same clips twice reuses them
+-- instead of importing duplicates.
+local function find_clips_by_path(folder, wanted, found)
+    for _, item in ipairs(api_objects(folder:GetClipList())) do
+        local path = item:GetClipProperty("File Path")
+        if path and wanted[path] and not found[path] then
+            found[path] = item
+        end
+    end
+    for _, sub in ipairs(api_objects(folder:GetSubFolderList())) do
+        find_clips_by_path(sub, wanted, found)
+    end
+end
+
+-- Returns the Media Pool items for `paths`, in order, importing any that
+-- aren't in the pool yet. Importing by absolute path means Resolve links the
+-- exact file, so there's no timecode/reel/frame-rate conform step that could
+-- leave a clip offline (which is what EDL import did).
+local function media_pool_items(media_pool, paths)
+    local wanted, found = {}, {}
+    for _, path in ipairs(paths) do
+        wanted[path] = true
+    end
+    find_clips_by_path(media_pool:GetRootFolder(), wanted, found)
+
+    local to_import = {}
+    for _, path in ipairs(paths) do
+        if not found[path] then
+            table.insert(to_import, path)
+        end
+    end
+    if #to_import > 0 then
+        local by_name = {}
+        for _, item in ipairs(api_objects(media_pool:ImportMedia(to_import))) do
+            local path = item:GetClipProperty("File Path")
+            if path and wanted[path] then
+                found[path] = item
+            end
+            by_name[item:GetClipProperty("File Name") or ""] = item
+        end
+        -- Resolve can report a normalised path (e.g. a resolved symlink), so
+        -- fall back to the file name among what was just imported.
+        for _, path in ipairs(to_import) do
+            found[path] = found[path] or by_name[basename(path)]
+        end
+    end
+
+    local items, missing = {}, {}
+    for _, path in ipairs(paths) do
+        if found[path] then
+            table.insert(items, found[path])
+        else
+            table.insert(missing, basename(path))
+        end
+    end
+    return items, missing
+end
+
+local function create_timeline(clips, timeline_name, markers)
     if not resolve then
         return false, "This script must be run from inside DaVinci Resolve (Workspace > Scripts > Utility > Videe)"
     end
@@ -1474,23 +1603,47 @@ local function import_edl(path, source_clips_path, timeline_name)
         return false, "No project is open in DaVinci Resolve"
     end
 
-    local media_pool = project:GetMediaPool()
-    local ok, result = pcall(function()
-        return media_pool:ImportTimelineFromFile(path, {
-            timelineName = timeline_name,
-            sourceClipsPath = source_clips_path,
-        })
-    end)
+    local paths = {}
+    for line in (clips or ""):gmatch("[^\n]+") do
+        table.insert(paths, line)
+    end
+    if #paths == 0 then
+        return false, "No clips were sent"
+    end
 
+    local media_pool = project:GetMediaPool()
+    local ok, items, missing = pcall(media_pool_items, media_pool, paths)
     if not ok then
+        return false, "Resolve error while importing media: " .. tostring(items)
+    end
+    if #missing > 0 then
+        return false, "Resolve couldn't import " .. table.concat(missing, ", ") .. " (is the file still there, and a format Resolve supports?)"
+    end
+
+    local created, result = pcall(function()
+        return media_pool:CreateTimelineFromClips(timeline_name, items)
+    end)
+    if not created then
         return false, "Resolve error: " .. tostring(result)
     end
     if not result then
-        return false, "Resolve could not import the EDL (check that the source clips are under " .. tostring(source_clips_path) .. ")"
+        return false, "Resolve could not create the timeline"
+    end
+
+    -- `result` is the newly created Timeline.
+    local wanted = parse_markers(markers)
+    local marker_ok, failed = pcall(add_markers, result, wanted)
+    if not marker_ok then
+        return false, "Timeline imported, but adding markers failed: " .. tostring(failed)
+    end
+    if failed > 0 then
+        return false, "Timeline imported, but " .. failed .. " of " .. #wanted .. " timestamps couldn't be added as markers"
     end
     return true
 end
 
+-- Returns the JSON response, plus `true` when this copy should stop serving
+-- after sending it.
 local function handle_request(body)
     local req = json.decode(body)
     if not req or not req.func then
@@ -1499,8 +1652,11 @@ local function handle_request(body)
 
     if req.func == "Ping" then
         return json.encode({ ok = true })
-    elseif req.func == "ImportEDL" then
-        local ok, err = import_edl(req.path, req.sourceClipsPath, req.timelineName)
+    elseif req.func == "Shutdown" then
+        -- Sent by a newly started copy of this script that wants the port.
+        return json.encode({ ok = true }), true
+    elseif req.func == "CreateTimeline" then
+        local ok, err = create_timeline(req.clips, req.timelineName, req.markers)
         return json.encode({ ok = ok, error = err })
     else
         return json.encode({ ok = false, error = "unknown func: " .. tostring(req.func) })
@@ -1543,7 +1699,7 @@ local function handle_client(client)
         body = body .. chunk
     end
 
-    local response_body = handle_request(body)
+    local response_body, stop = handle_request(body)
     local response = "HTTP/1.1 200 OK\r\n"
         .. "Content-Type: application/json\r\n"
         .. "Content-Length: " .. #response_body .. "\r\n"
@@ -1552,13 +1708,63 @@ local function handle_client(client)
 
     client:send(response)
     client:close()
+    return stop
+end
+
+-- ---- Startup: take over from a copy that's already running ----
+-- Resolve runs this script in a separate `fuscript` process that outlives
+-- quitting Resolve, so after Videe installs an updated script the old copy is
+-- usually still holding the port. Ask it to exit rather than making the user
+-- hunt the process down.
+
+local function request_shutdown()
+    local client = ljsocket.create("inet", "stream", "tcp")
+    if not client then
+        return false
+    end
+    client:set_blocking(true)
+    if not client:connect("127.0.0.1", tostring(PORT)) then
+        client:close()
+        return false
+    end
+    local body = json.encode({ func = "Shutdown" })
+    client:send("POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+        .. "Content-Length: " .. #body .. "\r\nConnection: close\r\n\r\n" .. body)
+    local reply = client:receive(4096)
+    client:close()
+    return reply ~= nil and reply:find('"ok":true', 1, true) ~= nil
+end
+
+local function bind_server()
+    local server, err = ljsocket.bind("127.0.0.1", tostring(PORT))
+    if server then
+        return server
+    end
+    if not request_shutdown() then
+        return nil, err, false
+    end
+    -- The old copy exits after replying; give it a moment to release the port.
+    for _ = 1, 30 do
+        sleep_ms(100)
+        server, err = ljsocket.bind("127.0.0.1", tostring(PORT))
+        if server then
+            return server
+        end
+    end
+    return nil, err, true
 end
 
 -- ---- Main loop ----
 
-local server, bind_err = ljsocket.bind("127.0.0.1", tostring(PORT))
+local server, bind_err, asked_old_copy = bind_server()
 if not server then
-    print("Videe bridge: failed to bind 127.0.0.1:" .. PORT .. " (" .. tostring(bind_err) .. "). Already running?")
+    if asked_old_copy then
+        print("Videe bridge: failed to bind 127.0.0.1:" .. PORT .. " (" .. tostring(bind_err) .. ") even after asking the running copy to stop. Try running Videe from the Scripts menu again.")
+    else
+        print("Videe bridge: failed to bind 127.0.0.1:" .. PORT .. " (" .. tostring(bind_err) .. ")."
+            .. " If an older Videe bridge is still running it can't be stopped automatically: quit Resolve,"
+            .. " run `pkill fuscript` in Terminal, then reopen Resolve and run Videe again.")
+    end
     return
 end
 
@@ -1570,9 +1776,13 @@ print("Videe bridge listening on 127.0.0.1:" .. PORT)
 while true do
     local client = server:accept()
     if client then
-        local ok, err = pcall(handle_client, client)
+        local ok, stop = pcall(handle_client, client)
         if not ok then
-            print("Videe bridge: error handling request: " .. tostring(err))
+            print("Videe bridge: error handling request: " .. tostring(stop))
+        elseif stop then
+            server:close()
+            print("Videe bridge: stopped so a newly started copy can take over")
+            break
         end
     else
         sleep_ms(100)
