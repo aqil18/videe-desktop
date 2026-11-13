@@ -63,8 +63,31 @@ export function resolveInstallScript(): Promise<string> {
   return invoke("resolve_install_script");
 }
 
-// Builds an EDL from the selection and hands it to the running Videe.lua
-// bridge to import as a new timeline, using the library folder to relink clips.
+// Hands the selection to the running Videe.lua bridge, which imports the files
+// into the open Resolve project, builds a timeline, and adds timestamp markers.
 export function sendClipsToResolve(libraryRoot: string, clipIds: string[]): Promise<void> {
   return invoke("send_clips_to_resolve", { input: { libraryRoot, clipIds } });
+}
+
+// Pure status check for the Premiere Pro bridge -- true only if the Videe CEP
+// panel is open inside Premiere and reachable.
+export function premierePing(): Promise<boolean> {
+  return invoke("premiere_ping");
+}
+
+// Path the CEP extension is installed at, if it's been installed at all.
+export function premiereExtensionStatus(): Promise<string | null> {
+  return invoke("premiere_extension_status");
+}
+
+// Copies the bundled CEP extension into Adobe's extensions folder and enables
+// PlayerDebugMode so Premiere loads it. Resolves to the installed path.
+export function premiereInstallExtension(): Promise<string> {
+  return invoke("premiere_install_extension");
+}
+
+// Same as sendClipsToResolve, but to the Videe panel in Premiere Pro: imports
+// the files, builds a sequence, and adds timestamp markers.
+export function sendClipsToPremiere(libraryRoot: string, clipIds: string[]): Promise<void> {
+  return invoke("send_clips_to_premiere", { input: { libraryRoot, clipIds } });
 }

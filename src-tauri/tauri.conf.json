@@ -38,6 +38,10 @@
     "externalBin": ["binaries/ffmpeg", "binaries/ffprobe"],
     "resources": {
       "../integrations/resolve/Videe.lua": "Videe.lua",
+      "../integrations/premiere/com.videe.bridge/CSXS/manifest.xml": "premiere/com.videe.bridge/CSXS/manifest.xml",
+      "../integrations/premiere/com.videe.bridge/index.html": "premiere/com.videe.bridge/index.html",
+      "../integrations/premiere/com.videe.bridge/main.js": "premiere/com.videe.bridge/main.js",
+      "../integrations/premiere/com.videe.bridge/host.jsx": "premiere/com.videe.bridge/host.jsx",
       "binaries/ffmpeg-COPYING.LGPLv2.1": "licenses/ffmpeg/COPYING.LGPLv2.1",
       "binaries/ffmpeg-build.txt": "licenses/ffmpeg/BUILD.txt"
     }

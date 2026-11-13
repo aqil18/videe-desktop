@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Videe</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #232323;
+        color: #b8b8b8;
+        font: 12px -apple-system, "Segoe UI", sans-serif;
+      }
+      main {
+        padding: 10px 12px;
+      }
+      #status::before {
+        content: "";
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-right: 6px;
+        border-radius: 50%;
+        background: #777;
+      }
+      #status.ok::before {
+        background: #10b981;
+      }
+      #status.error::before {
+        background: #ef4444;
+      }
+      #last {
+        margin-top: 8px;
+        color: #8a8a8a;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div id="status">Starting…</div>
+      <div id="last"></div>
+    </main>
+    <script src="./main.js"></script>
+  </body>
+</html>

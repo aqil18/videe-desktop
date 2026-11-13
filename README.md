@@ -53,6 +53,23 @@ EDL** buttons. A native save dialog asks where to put the file.
   new copy asks the running one to exit and takes over. (Restarting Resolve
   alone doesn't do it: the script runs in a `fuscript` process that outlives
   Resolve.)
+- **Send to Premiere**: the same thing for Premiere Pro (2020 / 14.0 or
+  later). Imports the files into a `Videe` bin in the open project (reusing
+  any already in the project), builds a new sequence from them, and adds each
+  timestamp as a blue sequence marker. Set up once: open the **Premiere Pro**
+  panel in Videe, click **Install Extension**, restart Premiere, then open
+  **Window > Extensions > Videe** and dock it. Premiere reopens docked panels
+  with the workspace, so after that it's always running. The extension is an
+  unsigned CEP panel, so installing also turns on Adobe's per-user
+  `PlayerDebugMode` setting (`defaults write com.adobe.CSXS.<9-14>
+  PlayerDebugMode 1` on macOS, the matching `HKCU\Software\Adobe\CSXS.<n>`
+  registry value on Windows), which is what lets unsigned CEP panels load.
+  After updating Videe, click **Reinstall Extension**, then close and reopen
+  the Videe panel in Premiere.
+
+Both bridges work the same way: a small server runs inside the NLE (the Lua
+script on port 51735, the Premiere panel on port 51736, both bound to
+127.0.0.1 only) and Videe sends it one HTTP request when you click the button.
 
 This intentionally doesn't export FCPXML. FCPXML's resource/timecode schema
 is easy to get subtly wrong, and a file that silently fails to import is
@@ -119,6 +136,11 @@ src-tauri/src/
   ffmpeg.rs     thumbnail generation, duration/frame-rate probing via ffmpeg sidecar
   watcher.rs    notify-based watcher for collaborator changes
   export.rs     CSV/EDL export builders
+  bridge.rs     HTTP client for the Resolve and Premiere bridges
+  resolve_bridge.rs / premiere_bridge.rs   installers for each bridge
+integrations/
+  resolve/Videe.lua           bridge script that runs inside DaVinci Resolve
+  premiere/com.videe.bridge/  CEP panel (Node HTTP server + ExtendScript) for Premiere Pro
 src/
   components/   React components (library grid, clip cards, ...)
   lib/          frontend API wrapper around Tauri commands, formatting helpers

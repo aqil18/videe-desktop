@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ClipDetailPanel } from "./components/ClipDetailPanel";
 import { FilterBar } from "./components/FilterBar";
 import { LibraryGrid } from "./components/LibraryGrid";
-import { ResolvePanel } from "./components/ResolvePanel";
+import { NleBridgePanel, type Nle } from "./components/NleBridgePanel";
 import {
   exportClips,
   getCachedLibrary,
@@ -11,6 +11,7 @@ import {
   pickLibraryFolder,
   saveProjectTags,
   scanLibrary,
+  sendClipsToPremiere,
   sendClipsToResolve,
   startWatching,
   type ExportFormat,
@@ -31,8 +32,8 @@ function App() {
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
   const [selectedForExport, setSelectedForExport] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
-  const [isSendingToResolve, setIsSendingToResolve] = useState(false);
-  const [isResolvePanelOpen, setIsResolvePanelOpen] = useState(false);
+  const [sendingTo, setSendingTo] = useState<Nle | null>(null);
+  const [openBridgePanel, setOpenBridgePanel] = useState<Nle | null>(null);
   const [projectTags, setProjectTags] = useState<string[]>([]);
 
   useEffect(() => {
@@ -173,17 +174,18 @@ function App() {
     }
   }
 
-  async function handleSendToResolve() {
+  async function handleSendTo(nle: Nle) {
     if (!libraryRoot || selectedForExport.size === 0) return;
-    setIsSendingToResolve(true);
+    setSendingTo(nle);
     setError(null);
     try {
-      await sendClipsToResolve(libraryRoot, Array.from(selectedForExport));
+      const send = nle === "resolve" ? sendClipsToResolve : sendClipsToPremiere;
+      await send(libraryRoot, Array.from(selectedForExport));
       setSelectedForExport(new Set());
     } catch (e) {
       setError(String(e));
     } finally {
-      setIsSendingToResolve(false);
+      setSendingTo(null);
     }
   }
 
@@ -238,14 +240,22 @@ function App() {
               Rescan
             </button>
           )}
-          <div className="relative">
+          <div className="relative flex items-center gap-2">
             <button
-              onClick={() => setIsResolvePanelOpen((open) => !open)}
+              onClick={() => setOpenBridgePanel((open) => (open === "resolve" ? null : "resolve"))}
               className="rounded-md bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 transition hover:bg-neutral-700"
             >
               DaVinci Resolve
             </button>
-            {isResolvePanelOpen && <ResolvePanel onClose={() => setIsResolvePanelOpen(false)} />}
+            <button
+              onClick={() => setOpenBridgePanel((open) => (open === "premiere" ? null : "premiere"))}
+              className="rounded-md bg-neutral-800 px-3 py-1.5 text-sm text-neutral-100 transition hover:bg-neutral-700"
+            >
+              Premiere Pro
+            </button>
+            {openBridgePanel && (
+              <NleBridgePanel key={openBridgePanel} nle={openBridgePanel} onClose={() => setOpenBridgePanel(null)} />
+            )}
           </div>
         </div>
       </header>
@@ -286,11 +296,18 @@ function App() {
             Export EDL
           </button>
           <button
-            onClick={handleSendToResolve}
-            disabled={isSendingToResolve}
+            onClick={() => handleSendTo("resolve")}
+            disabled={sendingTo !== null}
             className="rounded-md bg-neutral-800 px-3 py-1 text-xs text-neutral-100 transition hover:bg-neutral-700 disabled:opacity-50"
           >
-            {isSendingToResolve ? "Sending…" : "Send to DaVinci"}
+            {sendingTo === "resolve" ? "Sending…" : "Send to DaVinci"}
+          </button>
+          <button
+            onClick={() => handleSendTo("premiere")}
+            disabled={sendingTo !== null}
+            className="rounded-md bg-neutral-800 px-3 py-1 text-xs text-neutral-100 transition hover:bg-neutral-700 disabled:opacity-50"
+          >
+            {sendingTo === "premiere" ? "Sending…" : "Send to Premiere"}
           </button>
           <button
             onClick={() => setSelectedForExport(new Set())}

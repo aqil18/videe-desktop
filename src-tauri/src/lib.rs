@@ -1,7 +1,9 @@
+mod bridge;
 mod cache;
 mod export;
 mod ffmpeg;
 mod metadata;
+mod premiere_bridge;
 mod resolve_bridge;
 mod scanner;
 mod watcher;
@@ -370,7 +372,7 @@ async fn export_clips(app: AppHandle, state: State<'_, AppState>, input: ExportC
 
 #[tauri::command]
 async fn resolve_ping() -> bool {
-    resolve_bridge::ping().await
+    bridge::ping(bridge::Nle::Resolve).await
 }
 
 #[tauri::command]
@@ -383,29 +385,43 @@ fn resolve_install_script(app: AppHandle) -> Result<String, String> {
     resolve_bridge::install_script(&app).map(|p| p.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+async fn premiere_ping() -> bool {
+    bridge::ping(bridge::Nle::Premiere).await
+}
+
+#[tauri::command]
+fn premiere_extension_status() -> Option<String> {
+    premiere_bridge::extension_status().map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn premiere_install_extension(app: AppHandle) -> Result<String, String> {
+    premiere_bridge::install_extension(&app).map(|p| p.to_string_lossy().to_string())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SendClipsToResolveInput {
+struct SendClipsInput {
     library_root: String,
     clip_ids: Vec<String>,
 }
 
-/// Sends the selection to the `Videe.lua` bridge running inside DaVinci Resolve,
-/// which imports the files by absolute path and builds a timeline from them,
-/// then adds each clip's timestamps as markers. No EDL is involved: EDL conform
-/// has to re-find media by timecode, frame rate and reel name, and any mismatch
-/// shows up as Media Offline. Importing the exact files can't go offline.
-#[tauri::command]
-async fn send_clips_to_resolve(state: State<'_, AppState>, input: SendClipsToResolveInput) -> Result<(), String> {
+/// Sends the selection to the bridge running inside `nle`, which imports the
+/// files by absolute path and builds a timeline from them, then adds each clip's
+/// timestamps as markers. No EDL is involved: EDL conform has to re-find media
+/// by timecode, frame rate and reel name, and any mismatch shows up as Media
+/// Offline. Importing the exact files can't go offline.
+async fn send_clips(nle: bridge::Nle, state: State<'_, AppState>, input: SendClipsInput) -> Result<(), String> {
     let root = Path::new(&input.library_root);
     let selected = selected_clip_rows(&state, &input.library_root, &input.clip_ids)?;
     let rows = build_export_rows(root, &selected);
     let clip_paths: Vec<PathBuf> = selected.iter().map(|clip| PathBuf::from(&clip.path)).collect();
-    let markers: Vec<resolve_bridge::ClipMarker> = rows
+    let markers: Vec<bridge::ClipMarker> = rows
         .iter()
         .enumerate()
         .flat_map(|(clip_index, row)| {
-            row.timestamps.iter().map(move |ts| resolve_bridge::ClipMarker {
+            row.timestamps.iter().map(move |ts| bridge::ClipMarker {
                 clip_index,
                 offset_seconds: ts.seconds - row.in_seconds,
                 label: ts.label.clone(),
@@ -414,9 +430,19 @@ async fn send_clips_to_resolve(state: State<'_, AppState>, input: SendClipsToRes
         .collect();
 
     let timeline_name = format!("Videe Export {}", metadata::now_iso8601());
-    resolve_bridge::create_timeline(&clip_paths, &timeline_name, &markers)
+    bridge::create_timeline(nle, &clip_paths, &timeline_name, &markers)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn send_clips_to_resolve(state: State<'_, AppState>, input: SendClipsInput) -> Result<(), String> {
+    send_clips(bridge::Nle::Resolve, state, input).await
+}
+
+#[tauri::command]
+async fn send_clips_to_premiere(state: State<'_, AppState>, input: SendClipsInput) -> Result<(), String> {
+    send_clips(bridge::Nle::Premiere, state, input).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -452,6 +478,10 @@ pub fn run() {
             resolve_script_status,
             resolve_install_script,
             send_clips_to_resolve,
+            premiere_ping,
+            premiere_extension_status,
+            premiere_install_extension,
+            send_clips_to_premiere,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

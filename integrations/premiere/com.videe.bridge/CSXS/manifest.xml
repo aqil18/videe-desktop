@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Videe <-> Adobe Premiere Pro bridge (CEP panel). Installed by Videe's
+  "Install Extension" button into Adobe's per-user CEP extensions folder.
+  Unsigned, so it only loads with PlayerDebugMode enabled, which the
+  installer also sets. See integrations/premiere/com.videe.bridge/main.js.
+-->
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.videe.bridge" ExtensionBundleVersion="1.0.0" ExtensionBundleName="Videe" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ExtensionList>
+    <Extension Id="com.videe.bridge.panel" Version="1.0.0"/>
+  </ExtensionList>
+  <ExecutionEnvironment>
+    <HostList>
+      <!-- 14.0 (2020) is the first release with createNewSequenceFromClips. -->
+      <Host Name="PPRO" Version="[14.0,99.9]"/>
+    </HostList>
+    <LocaleList>
+      <Locale Code="All"/>
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="9.0"/>
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="com.videe.bridge.panel">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+          <ScriptPath>./host.jsx</ScriptPath>
+          <CEFCommandLine>
+            <!-- Node's http module is what lets the panel listen for Videe. -->
+            <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--mixed-context</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>Videe</Menu>
+          <Geometry>
+            <Size>
+              <Height>160</Height>
+              <Width>320</Width>
+            </Size>
+            <MinSize>
+              <Height>60</Height>
+              <Width>160</Width>
+            </MinSize>
+          </Geometry>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>
