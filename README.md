@@ -8,6 +8,7 @@ or any similar client, and it:
 - scans that folder for video files and shows them as a searchable, taggable grid
 - lets you tag clips, add notes, and drop timestamps on a timeline (press T)
 - writes all of that metadata as small JSON files *inside the same folder*
+- export timestamps and clips directly into Davinci Resolve or Premiere Pro
 
 Because the metadata lives next to your footage in the synced folder, it
 propagates to your teammates automatically through whatever sync client they
