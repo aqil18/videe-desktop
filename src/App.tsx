@@ -203,7 +203,7 @@ function App() {
     return clips.filter((c) => {
       const matchesQuery =
         !q || c.filename.toLowerCase().includes(q) || c.tags.some((t) => t.toLowerCase().includes(q));
-      const matchesTags = activeTags.size === 0 || Array.from(activeTags).every((t) => c.tags.includes(t));
+      const matchesTags = activeTags.size === 0 || c.tags.some((t) => activeTags.has(t));
       return matchesQuery && matchesTags;
     });
   }, [clips, searchQuery, activeTags]);
